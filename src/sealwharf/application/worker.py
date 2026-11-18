@@ -21,7 +21,7 @@ from ..adapters.inbox import Inbox, Job, PendingSignature, SigningRequestRecord
 from ..adapters.local_ai import suggest_local_ai_position
 from ..authorization import format_number
 from ..documents.contextual_position import suggest_contextual_position
-from ..documents.docx import convert_docx_to_pdf
+from ..documents.docx import convert_docx_to_pdf, substituted_fonts
 from ..documents.names import contains_name, matches_name
 from ..documents.normalize import normalize_rotation
 from ..documents.position import find_signature_position, has_signature_widgets
@@ -399,7 +399,11 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
             inbox.set_state(message_id, "verified")
             return
         if document.startswith(b"PK\x03\x04"):
+            replaced = substituted_fonts(document)
             document = convert_docx_to_pdf(document)
+            if replaced:
+                runtime.mention(client, sender, "fonts_replaced",
+                                fonts=", ".join(f"{font} → {other}" for font, other in replaced))
         validate_pdf(document)
         document = normalize_rotation(document)
         referenced = _referenced_signers(document, authorized)

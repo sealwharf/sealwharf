@@ -19,7 +19,23 @@ MAIN_DOCUMENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessi
 RELATIONSHIPS_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships"
 CONTENT_TYPES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/content-types"
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-UNSAFE_FIELD = re.compile(r"\b(?:DDE|DDEAUTO|LINK|HYPERLINK|INCLUDETEXT|INCLUDEPICTURE|DATABASE)\b", re.IGNORECASE)
+DRAWING_NAMESPACE = "http://schemas.openxmlformats.org/drawingml/2006/main"
+CONTENT_PART = re.compile(r"word/(?:document|footnotes|endnotes|header\d*|footer\d*)\.xml")
+MAX_FONTS = 30
+# Free fonts drawn to the same widths as the originals: replacing one keeps every line break.
+_SANS = frozenset({"liberation sans", "arimo", "nimbus sans"})
+_SERIF = frozenset({"liberation serif", "tinos", "nimbus roman"})
+_MONO = frozenset({"liberation mono", "cousine", "nimbus mono ps"})
+SAME_WIDTH = {
+    "arial": _SANS, "helvetica": _SANS, "times new roman": _SERIF, "times": _SERIF,
+    "courier new": _MONO, "courier": _MONO, "calibri": frozenset({"carlito"}), "cambria": frozenset({"caladea"}),
+    "arial narrow": frozenset({"liberation sans narrow", "nimbus sans narrow"}),
+    "palatino": frozenset({"p052"}), "palatino linotype": frozenset({"p052"}), "book antiqua": frozenset({"p052"}),
+    "century schoolbook": frozenset({"c059"}), "bookman old style": frozenset({"urw bookman"}),
+}
+# LibreOffice draws these with its own symbol font.
+SYMBOL_FONTS = frozenset({"symbol", "wingdings", "wingdings 2", "wingdings 3", "webdings"})
+UNSAFE_FIELD =re.compile(r"\b(?:DDE|DDEAUTO|LINK|HYPERLINK|INCLUDETEXT|INCLUDEPICTURE|DATABASE)\b", re.IGNORECASE)
 
 
 class DocxError(Exception):
@@ -88,6 +104,96 @@ def validate_docx(data: bytes) -> None:
         raise
     except (BadZipFile, OSError, RuntimeError, ValueError, KeyError) as exc:
         raise DocxError("Invalid DOCX package.") from exc
+
+
+def _theme_fonts(package: ZipFile) -> dict[str, str]:
+    name = next((item for item in sorted(package.namelist())
+                 if item.casefold().startswith("word/theme/") and item.casefold().endswith(".xml")), None)
+    if name is None:
+        return {}
+    root = _parse_xml(package.read(name))
+    found = {}
+    for kind in ("major", "minor"):
+        latin = root.find(f".//{{{DRAWING_NAMESPACE}}}{kind}Font/{{{DRAWING_NAMESPACE}}}latin")
+        if latin is not None and latin.get("typeface"):
+            found[kind] = latin.get("typeface")
+    return found
+
+
+def _fonts_in(node, theme: dict[str, str]) -> list[str]:
+    fonts = []
+    for item in node.iter(f"{{{WORD_NAMESPACE}}}rFonts"):
+        for attribute in ("ascii", "hAnsi"):
+            themed = item.get(f"{{{WORD_NAMESPACE}}}{attribute}Theme", "")
+            fonts.append(theme.get(themed[:5], "") if themed else item.get(f"{{{WORD_NAMESPACE}}}{attribute}", ""))
+    return fonts
+
+
+def document_fonts(data: bytes) -> tuple[str, ...]:
+    """Latin fonts a DOCX asks for: its defaults, the styles it uses and its own text."""
+    word = f"{{{WORD_NAMESPACE}}}"
+    with ZipFile(BytesIO(data)) as package:
+        names = {name.casefold(): name for name in package.namelist()}
+        theme = _theme_fonts(package)
+        direct: list[str] = []
+        used: set[str] = set()
+        for lower, name in names.items():
+            if CONTENT_PART.fullmatch(lower):
+                root = _parse_xml(package.read(name))
+                direct += _fonts_in(root, theme)
+                used.update(node.get(f"{word}val", "") for tag in ("pStyle", "rStyle", "tblStyle")
+                            for node in root.iter(word + tag))
+        fonts: list[str] = []
+        if "word/styles.xml" in names:
+            root = _parse_xml(package.read(names["word/styles.xml"]))
+            for defaults in root.iter(f"{word}docDefaults"):
+                fonts += _fonts_in(defaults, theme)
+            styles = {style.get(f"{word}styleId", ""): style for style in root.iter(f"{word}style")}
+            pending = [identifier for identifier, style in styles.items()
+                       if identifier in used or style.get(f"{word}default") in ("1", "true")]
+            seen: set[str] = set()
+            while pending:
+                identifier = pending.pop()
+                if identifier in seen or identifier not in styles:
+                    continue
+                seen.add(identifier)
+                fonts += _fonts_in(styles[identifier], theme)
+                pending += [node.get(f"{word}val", "") for node in styles[identifier].iter(f"{word}basedOn")]
+    unique: dict[str, str] = {}
+    for font in fonts + direct:
+        font = font.strip()
+        if font and len(font) <= 64 and font.isprintable():
+            unique.setdefault(font.casefold(), font)
+    return tuple(unique.values())[:MAX_FONTS]
+
+
+def substituted_fonts(data: bytes) -> tuple[tuple[str, str], ...]:
+    """Fonts of a DOCX that are not installed, each with the font that takes its place.
+
+    Replacements of the same width are left out, as they keep the layout. This
+    is only advice for the requester, so any failure means no advice.
+    """
+    matcher = shutil.which("fc-match")
+    if matcher is None:
+        return ()
+    replaced = []
+    try:
+        for font in document_fonts(data):
+            key = font.casefold()
+            if key in SYMBOL_FONTS:
+                continue
+            pattern = re.sub(r"([\\:,-])", r"\\\1", font)
+            result = subprocess.run([matcher, "-f", "%{family}", "--", pattern], stdin=subprocess.DEVNULL,
+                                    capture_output=True, text=True, timeout=10, check=False)
+            families = [family.strip() for family in result.stdout.split(",") if family.strip()]
+            if result.returncode != 0 or not families:
+                continue
+            installed = {family.casefold() for family in families}
+            if key not in installed and not installed & SAME_WIDTH.get(key, frozenset()):
+                replaced.append((font, families[0]))
+    except (DocxError, BadZipFile, OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return ()
+    return tuple(replaced)
 
 
 def find_libreoffice() -> Path | None:

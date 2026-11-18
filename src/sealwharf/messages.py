@@ -21,6 +21,12 @@ MESSAGES = {
         "en": "Got it! Working on your document...",
         "pt-br": "Recebido! Estou processando o seu documento...",
     },
+    "fonts_replaced": {
+        "en": "Your Word document was converted to PDF. I replaced the fonts I do not have: {fonts}. "
+              "For a perfect result, send the document as PDF.",
+        "pt-br": "Seu documento Word foi convertido para PDF. Substituí as fontes que não tenho: {fonts}. "
+                 "Para um resultado perfeito, envie o documento em PDF.",
+    },
     "signed_by": {
         "en": "All set! Signed by: {signed}.",
         "pt-br": "Tudo certo! Assinado por: {signed}.",

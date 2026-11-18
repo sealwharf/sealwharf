@@ -93,3 +93,43 @@ def test_word_default_fonts_convert_to_fonts_of_the_same_width():
             for page in PdfReader(BytesIO(converted)).pages for font in page["/Resources"]["/Font"].values()}
     assert not any("DejaVu" in name for name in used)
     assert any(name.startswith(("Carlito", "Aptos")) for name in used) and any(name.startswith("LiberationSans") for name in used)
+
+
+THEME = ('<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:fontScheme>'
+         '<a:majorFont><a:latin typeface="Heading Face"/></a:majorFont><a:minorFont><a:latin typeface="Body Face"/></a:minorFont>'
+         "</a:fontScheme></a:themeElements></a:theme>")
+STYLES = ('<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+          '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:asciiTheme="minorHAnsi" w:hAnsiTheme="minorHAnsi"/></w:rPr></w:rPrDefault></w:docDefaults>'
+          '<w:style w:styleId="Base"><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/></w:rPr></w:style>'
+          '<w:style w:styleId="Title"><w:basedOn w:val="Base"/><w:rPr><w:rFonts w:asciiTheme="majorHAnsi"/></w:rPr></w:style>'
+          '<w:style w:styleId="Unused"><w:rPr><w:rFonts w:ascii="Never Used"/></w:rPr></w:style></w:styles>')
+STYLED = ('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+          '<w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Fancy-Script" w:hAnsi="fancy-script" '
+          'w:eastAsia="Ignored"/></w:rPr><w:t>Text</w:t></w:r></w:p></w:body></w:document>')
+
+
+def styled_docx():
+    return docx({"word/styles.xml": STYLES, "word/theme/theme1.xml": THEME}, STYLED.encode())
+
+
+def test_lists_the_fonts_a_document_really_uses():
+    from sealwharf.documents.docx import document_fonts
+    assert document_fonts(styled_docx()) == ("Body Face", "Heading Face", "Calibri", "Fancy-Script")
+    assert document_fonts(docx()) == ()
+
+
+def test_reports_only_replacements_that_change_the_layout(monkeypatch):
+    from sealwharf.documents import docx as module
+    installed = {"Body Face": "Body Face", "Heading Face": "DejaVu Sans", "Calibri": "Carlito", r"Fancy\-Script": "Lobster,Lobster Two"}
+    asked = []
+    def fake_run(command, **kwargs):
+        assert command[-2] == "--"
+        asked.append(command[-1])
+        return SimpleNamespace(returncode=0, stdout=installed[command[-1]])
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/fc-match")
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    assert module.substituted_fonts(styled_docx()) == (("Heading Face", "DejaVu Sans"), ("Fancy-Script", "Lobster"))
+    assert len(asked) == 4
+    assert module.substituted_fonts(b"PK\x03\x04broken") == ()
+    monkeypatch.setattr(module.shutil, "which", lambda name: None)
+    assert module.substituted_fonts(styled_docx()) == ()

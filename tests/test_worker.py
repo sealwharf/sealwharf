@@ -213,3 +213,20 @@ def test_initialed_names_identify_signers_only_when_unambiguous():
     assert _referenced_signers(_text_pdf("Jane M. Example and John Example"), (maria, john)) == (maria, john)
     assert _referenced_signers(_text_pdf("Jane M. Example and John Example"), (maria, marta, john)) == ()
     assert _referenced_signers(_text_pdf("Jane Maria Example"), (maria, marta, john)) == (maria,)
+
+
+def test_replaced_fonts_are_mentioned_and_the_document_is_still_signed(tmp_path, monkeypatch):
+    from sealwharf.application.worker import Runtime
+    inbox = Inbox(tmp_path / "queue.db")
+    inbox.add([("message", "media", "Report.docx", "5511999999999")])
+    sent, notes = [], []
+    client = SimpleNamespace(download_document=lambda _: b"PK\x03\x04docx", send_pdf=lambda _, data, name: sent.append(data))
+    monkeypatch.setattr(Runtime, "mention", lambda self, client, number, key, **values: notes.append((key, values)))
+    monkeypatch.setattr("sealwharf.application.worker.substituted_fonts", lambda _: (("Rare Face", "DejaVu Sans"),))
+    monkeypatch.setattr("sealwharf.application.worker.convert_docx_to_pdf", lambda _: b"pdf")
+    monkeypatch.setattr("sealwharf.application.worker.validate_pdf", lambda *_: None)
+    monkeypatch.setattr("sealwharf.application.worker.find_signature_position", lambda *_: SimpleNamespace(page=0, box=(1, 2, 3, 4), field_name="Signature"))
+    monkeypatch.setattr("sealwharf.application.worker.sign_pdf", lambda *_: b"signed")
+    assert process_one(inbox, client, signer())
+    assert sent == [b"signed"] and state(inbox) == "sent"
+    assert ("fonts_replaced", {"fonts": "Rare Face → DejaVu Sans"}) in notes

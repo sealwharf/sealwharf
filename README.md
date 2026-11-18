@@ -272,8 +272,22 @@ docker compose run --rm sealwharf check
 | "The configured name does not match certificate" | Write `name` with the same words as the holder's name in the certificate. Capitals and accents do not matter, but every word must be there, in the same order. |
 | "could not open … token is connected" | The token is unplugged or not attached. On Windows, repeat `usbipd attach`. |
 | "refused its PIN" | See *About the PIN* above. |
-| A Word document comes back with a different layout | Copy the fonts the document uses (`.ttf` or `.otf` files) into `config/fonts/` and restart. |
+| A Word document comes back with a different layout | See *Fonts in Word documents* below. |
 | The owner did not receive the approval request | Confirm the owner's number in `contacts`, with country and area codes. |
+
+## Fonts in Word documents
+
+A Word document is converted to PDF before it is signed, and the conversion needs the fonts the document was written with. Sealwharf already has:
+
+- free fonts with the same widths as Arial, Times New Roman, Courier New, Calibri, Cambria, Helvetica and Palatino, so documents written with those keep every line in place;
+- free fonts common in documents written on the web: Roboto, Open Sans, Lato, Noto, Inter, EB Garamond, Comfortaa and Lobster.
+
+When a document uses a font that is missing, the bot signs it anyway and tells you which font was replaced by which, for example `Aptos → Carlito`. The text is all there, but lines may break in other places.
+
+To get exactly the same result as on your computer, do one of these:
+
+- Send the document as PDF.
+- Give Sealwharf the font. Copy its files (`.ttf` or `.otf`) into the folder `config/fonts/`. The next document already uses them; there is nothing to restart. On Windows the fonts are in `C:\Windows\Fonts`. Copy only fonts you have the right to use.
 
 ## Good to know
 
@@ -303,7 +317,6 @@ Notes on how signing works:
 - Middle names may be written as initials (`John M. Doe` for `John Michael Doe`), but the first and last names must be complete. Spelling errors are not accepted.
 - If the place to sign is unclear, or a name could belong to two signers, nothing is signed for that signer.
 - A signature proves the document was signed with that certificate and was not changed afterwards. Checking whether the certificate authority is trusted is done only when `trust_roots` is set.
-- Word documents are converted to PDF before signing. The image includes free fonts with the same widths as Arial, Times New Roman, Calibri and Cambria.
 
 ## Development
 
