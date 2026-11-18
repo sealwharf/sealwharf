@@ -47,6 +47,97 @@ def _text_scale(cm: list, tm: list) -> float | None:
     return a
 
 
+MIN_TEXT_POINTS = 4.0
+INVISIBLE_MODES = frozenset({3, 7})
+FILL_MODES = frozenset({0, 2, 4, 6})
+STROKE_MODES = frozenset({1, 2, 5, 6})
+
+
+def _near_white(operator: bytes, operands: list) -> bool | None:
+    """Whether a colour operator selects white; None when the operator sets no colour."""
+    if operator not in (b"g", b"G", b"rg", b"RG", b"k", b"K", b"sc", b"scn", b"SC", b"SCN"):
+        return None
+    try:
+        values = [float(value) for value in operands]
+    except (TypeError, ValueError):
+        return False
+    if operator in (b"g", b"G"):
+        return len(values) == 1 and values[0] >= 0.95
+    if operator in (b"rg", b"RG"):
+        return len(values) == 3 and min(values) >= 0.95
+    if operator in (b"k", b"K"):
+        return len(values) == 4 and max(values) <= 0.05
+    # The colour space is not tracked: only the common gray and RGB forms can count as white.
+    return (len(values) == 1 and values[0] >= 0.95) or (len(values) == 3 and min(values) >= 0.95)
+
+
+SHOW_OPERATORS = frozenset({b"Tj", b"TJ", b"'", b'"'})
+
+
+class TextVisibility:
+    """Follow the text render mode, colours and size that decide whether text can be seen.
+
+    A label must be readable on the page: invisible text, white text and text
+    smaller than MIN_TEXT_POINTS must never place a signature. pypdf hands over
+    the text of a whole text object at once, so visibility is judged at every
+    operator that draws text, and one hidden piece rejects the text handed over.
+    """
+
+    def __init__(self) -> None:
+        self.mode, self.white_fill, self.white_stroke, self.font_size = 0, False, False, 0.0
+        self.saved: list[tuple[int, bool, bool, float]] = []
+        self.hidden_pending = False
+
+    def observe(self, operator: bytes, operands: list, cm: list, tm: list) -> None:
+        if operator == b"q":
+            self.saved.append((self.mode, self.white_fill, self.white_stroke, self.font_size))
+        elif operator == b"Q":
+            if self.saved:
+                self.mode, self.white_fill, self.white_stroke, self.font_size = self.saved.pop()
+        elif operator == b"Tr":
+            try:
+                self.mode = int(operands[0]) if len(operands) == 1 else 3
+            except (TypeError, ValueError):
+                self.mode = 3
+        elif operator == b"Tf":
+            try:
+                self.font_size = float(operands[1]) if len(operands) == 2 else 0.0
+            except (TypeError, ValueError):
+                self.font_size = 0.0
+        elif operator in SHOW_OPERATORS:
+            if not self._drawn_visibly(cm, tm):
+                self.hidden_pending = True
+        else:
+            white = _near_white(operator, operands)
+            if white is not None:
+                if operator.islower():
+                    self.white_fill = white
+                else:
+                    self.white_stroke = white
+
+    def _drawn_visibly(self, cm: list, tm: list) -> bool:
+        try:
+            ta, tb, tc, td = (float(value) for value in tm[:4])
+            ca, cb, cc, cd = (float(value) for value in cm[:4])
+        except (TypeError, ValueError):
+            return False
+        width = math.hypot(ta * ca + tb * cc, ta * cb + tb * cd)
+        height = math.hypot(tc * ca + td * cc, tc * cb + td * cd)
+        size = abs(self.font_size) * min(width, height)
+        if not math.isfinite(size) or size < MIN_TEXT_POINTS or self.mode in INVISIBLE_MODES:
+            return False
+        return ((self.mode in FILL_MODES and not self.white_fill)
+                or (self.mode in STROKE_MODES and not self.white_stroke))
+
+    def accept(self, value: str) -> bool:
+        """Whether text handed over by pypdf was drawn visibly; resets after each non-empty piece."""
+        if not value.strip():
+            return True
+        visible = not self.hidden_pending
+        self.hidden_pending = False
+        return visible
+
+
 def _tokens(value: str) -> tuple[str, ...]:
     text = unicodedata.normalize("NFKD", value.casefold())
     text = "".join(char for char in text if not unicodedata.combining(char))
@@ -169,6 +260,7 @@ def suggest_visual_positions(document: bytes, *, signer_name: str | None = None,
     if only one passes collision checks. Estimates use approximate font metrics.
     When a signer name is supplied, require a nearby matching complete name;
     do not use partial names, a generic signature label, or competing labels.
+    Only text a reader can see counts as a label or as a typed line.
     No document text or signer name is returned, and visual cues do not
     guarantee the line's semantic meaning.
     """
@@ -193,9 +285,11 @@ def suggest_visual_positions(document: bytes, *, signer_name: str | None = None,
         labels: list[tuple[float, float, str]] = []
         path_start: tuple[float, float] | None = None
         pending: list[tuple[float, float, float]] = []
+        visibility = TextVisibility()
 
-        def operand(operator, operands, cm, tm, lines=lines):
+        def operand(operator, operands, cm, tm, lines=lines, visibility=visibility):
             nonlocal path_start, pending
+            visibility.observe(operator, operands, cm, tm)
             if not _quarter_turn(cm):
                 path_start = None
                 pending = []
@@ -217,7 +311,9 @@ def suggest_visual_positions(document: bytes, *, signer_name: str | None = None,
                 path_start = None
                 pending = []
 
-        def text(value, cm, tm, font, font_size, lines=lines, labels=labels):
+        def text(value, cm, tm, font, font_size, lines=lines, labels=labels, visibility=visibility):
+            if not visibility.accept(value):
+                return
             scale = _text_scale(cm, tm)
             if scale is None:
                 return

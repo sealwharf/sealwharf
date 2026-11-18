@@ -201,3 +201,38 @@ def test_normalization_leaves_unrotated_annotated_or_unreadable_documents_unchan
     content = b"100 200 m 250 200 l S BT /F1 10 Tf 140 185 Td (Jane Example) Tj ET"
     for document in [make_pdf(content), make_pdf(content, rotation=90, annotation=True), b"not a pdf"]:
         assert normalize_rotation(document) is document
+
+
+LINE = b"100 200 m 250 200 l S "
+
+
+@pytest.mark.parametrize("label", [
+    b"BT 3 Tr /F1 10 Tf 140 185 Td (Jane Example) Tj ET",  # invisible render mode
+    b"BT 7 Tr /F1 10 Tf 140 185 Td (Jane Example) Tj ET",  # clipping only, never painted
+    b"BT 3 Tr /F1 10 Tf 140 185 Td (Jane Example) Tj 0 Tr ( ) Tj ET",  # hidden name, visible blank after it
+    b"BT /F1 10 Tf 140 185 Td (Jane ) Tj 3 Tr (Example) Tj ET",  # half of the name hidden
+    b"1 g BT /F1 10 Tf 140 185 Td (Jane Example) Tj ET",  # white gray fill
+    b"1 1 1 rg BT /F1 10 Tf 140 185 Td (Jane Example) Tj ET",  # white RGB fill
+    b"0 0 0 0 k BT /F1 10 Tf 140 185 Td (Jane Example) Tj ET",  # white CMYK fill
+    b"BT /F1 0.5 Tf 140 195 Td (Jane Example) Tj ET",  # unreadably small
+    b"BT /F1 10 Tf 1 0 0 0.1 140 190 Tm (Jane Example) Tj ET",  # squashed to one point high
+])
+def test_text_a_reader_cannot_see_never_labels_a_line(label):
+    assert suggest_visual_positions(make_pdf(LINE + label), signer_name="Jane Example") == []
+
+
+def test_visibility_is_restored_with_the_graphics_state():
+    content = LINE + b"q 3 Tr 1 g /F1 0.5 Tf Q BT /F1 10 Tf 140 185 Td (Jane Example) Tj ET"
+    result = suggest_visual_positions(make_pdf(content), signer_name="Jane Example")
+    assert len(result) == 1 and result[0].box == (100, 202, 250, 242)
+
+
+def test_visible_label_after_hidden_text_object_still_counts():
+    content = LINE + b"BT 3 Tr /F1 10 Tf 300 500 Td (Hidden Note) Tj ET BT 0 Tr /F1 10 Tf 140 185 Td (Jane Example) Tj ET"
+    result = suggest_visual_positions(make_pdf(content), signer_name="Jane Example")
+    assert len(result) == 1
+
+
+def test_hidden_underscores_do_not_draw_a_line():
+    content = b"BT 3 Tr /F1 12 Tf 100 200 Td (____________________) Tj ET BT /F1 10 Tf 125 185 Td (Jane Example) Tj ET"
+    assert suggest_visual_positions(make_pdf(content), signer_name="Jane Example") == []
