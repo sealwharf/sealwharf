@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.env
+
+# Private state: configuration with secrets, certificates, documents and runtime data.
+/data/
+/config/*
+!/config/requirements-lock.txt
+!/config/requirements-dev.txt
+!/config/sealwharf.example.yaml
+*.p12
+*.pfx
+*.pem
+*.key
+*.pdf
+*.db
