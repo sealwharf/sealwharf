@@ -1,0 +1,674 @@
+"""End-to-end battery with self-signed certificates and an in-memory chat client."""
+
+import hashlib
+import logging
+import string
+import time
+from datetime import UTC, datetime, timedelta
+from io import BytesIO
+
+import httpx
+import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import pkcs12
+from cryptography.x509.oid import NameOID
+from pyhanko.pdf_utils.reader import PdfFileReader
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+from sealwharf.adapters.audit import AuditLog
+from sealwharf.adapters.inbox import Inbox, Job, accepted_events, parse_command
+from sealwharf.adapters.whapi import Whapi, signed_filename
+from sealwharf.application.signers import unlock_signers, warn_expiring
+from sealwharf.application.worker import Runtime, expire_requests, process_one
+from sealwharf.authorization import canonical_number, format_number
+from sealwharf.documents.verification import describe, verify_signatures
+from sealwharf.messages import LANGUAGES, MESSAGES
+from sealwharf.signer_config import SignerConfig, load_config
+
+OWNER_A, OWNER_B, OWNER_C = "5511900000001", "5511900000002", "5511900000003"
+PREPARER, TRUSTED, STRANGER = "5511900000010", "5511900000011", "5511900000099"
+NAMES = {"alice": "Alice Example", "bruno": "Bruno Example", "carla": "Carla Example"}
+PEOPLE = {OWNER_A: "Ana", OWNER_C: "Carla", PREPARER: "Paulo Preparer"}
+
+
+def make_certificate(folder, alias, common_name, *, days=365, password="pw-"):
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    now = datetime.now(UTC)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number()).not_valid_before(now - timedelta(days=400))
+            .not_valid_after(now + timedelta(days=days)).sign(key, hashes.SHA256()))
+    path = folder / f"{alias}.p12"
+    path.write_bytes(pkcs12.serialize_key_and_certificates(alias.encode(), key, cert, None,
+                                                            serialization.BestAvailableEncryption((password + alias).encode())))
+    return path
+
+
+def make_pdf(*names, password=None):
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=600, height=800)
+    font = DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"),
+                             NameObject("/BaseFont"): NameObject("/Helvetica")})
+    page[NameObject("/Resources")] = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font)})})
+    content = b""
+    for index, name in enumerate(names):
+        y = 650 - index * 150
+        content += f"100 {y} m 250 {y} l S BT /F1 10 Tf 110 {y - 15} Td ({name}) Tj ET ".encode("ascii")
+    stream = DecodedStreamObject()
+    stream.set_data(content)
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    if password:
+        writer.encrypt(password)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+class Chat:
+    COURTESY = ("Got it!", "Recebido!", "All set!", "Tudo certo!")
+
+    def __init__(self):
+        self.documents, self.texts, self.files, self.downloads, self.notes, self.forwarded = {}, [], [], [], [], []
+        self.order = []
+
+    def download_document(self, media_id):
+        self.downloads.append(media_id)
+        return self.documents[media_id]
+
+    def send_text(self, recipient, text):
+        # Courtesy notes are kept apart so the other assertions read only the messages that matter.
+        self.order.append((recipient, "text"))
+        (self.notes if text.startswith(self.COURTESY) else self.texts).append((recipient, text))
+
+    def send_pdf(self, recipient, data, filename=None, *, signed=True):
+        # Signed results and documents forwarded to an owner for approval are kept apart.
+        self.order.append((recipient, "pdf"))
+        (self.files if signed else self.forwarded).append((recipient, data, filename))
+
+    def to(self, recipient):
+        return [text for number, text in self.texts if number == recipient]
+
+
+@pytest.fixture
+def world(tmp_path):
+    """Three owners. Alice has a preparer who needs approval and a trusted one; her owner is trusted by Bruno."""
+    configs = []
+    owners = {"alice": OWNER_A, "bruno": OWNER_B, "carla": OWNER_C}
+    for alias, name in NAMES.items():
+        path = make_certificate(tmp_path, alias, name)
+        allowed = {owners[alias], PREPARER} | ({TRUSTED} if alias == "alice" else set()) | ({OWNER_A} if alias != "alice" else set())
+        autotrust = {TRUSTED} if alias == "alice" else ({OWNER_A} if alias == "bruno" else set())
+        configs.append(SignerConfig(alias, name, path, allowed_senders=frozenset(allowed), owner=owners[alias],
+                                    autotrust=frozenset(autotrust), password="pw-" + alias))
+    signers = unlock_signers(tuple(configs))
+    inbox = Inbox(tmp_path / "data" / "inbox.db")
+    runtime = Runtime(tmp_path / "data", requests_per_hour=20, confirmation_minutes=5, names=dict(PEOPLE))
+    chat = Chat()
+    counter = iter(range(1, 1000))
+
+    def send(sender, document=None, *, text=None, filename="report.pdf", caption=None, consent=True):
+        number = next(counter)
+        if text is not None:
+            inbox.add([Job(f"m{number}", "", None, sender, "text", parse_command(text))])
+        else:
+            chat.documents[f"media{number}"] = document
+            inbox.add([Job(f"m{number}", f"media{number}", filename, sender, "document", caption)])
+        assert process_one(inbox, chat, signers, runtime=runtime)
+        message = f"m{number}"
+        # Most tests are about what happens after the requester agrees to involve the owner.
+        if text is None and consent and state(message) == "awaiting_choice" and chat.to(sender)[-1].startswith("To sign as"):
+            send(sender, text="1")
+        return message
+
+    def state(message_id):
+        return inbox.get_state(message_id)
+
+    class World:
+        pass
+    result = World()
+    result.__dict__.update(send=send, state=state, chat=chat, inbox=inbox, runtime=runtime, signers=signers,
+                           audit=AuditLog(tmp_path / "data" / "audit.jsonl"), tmp_path=tmp_path)
+    return result
+
+
+def signer_names(pdf):
+    return [signature.signer_cert.subject.native["common_name"] for signature in PdfFileReader(BytesIO(pdf)).embedded_signatures]
+
+
+def later(world, minutes):
+    expire_requests(world.inbox, world.chat, world.signers, world.runtime, now=time.time() + minutes * 60)
+
+
+# Who may use the bot, and with which certificate.
+
+def test_unauthorized_number_is_ignored_at_the_webhook_and_by_the_worker(world):
+    payload = {"event": {"type": "messages", "event": "post"},
+               "messages": [{"id": "x1", "from_me": False, "type": "document", "chat_id": f"{STRANGER}@s.whatsapp.net",
+                             "from": STRANGER, "document": {"id": "media-x", "file_name": "a.pdf"}}]}
+    assert accepted_events(payload, frozenset({OWNER_A})) == []
+    message = world.send(STRANGER, make_pdf("Alice Example"))
+    assert world.state(message) == "needs_review"
+    assert not world.chat.texts and not world.chat.notes and not world.chat.files and not world.chat.downloads
+
+
+def test_owner_signs_own_document_directly_and_it_is_audited(world):
+    document = make_pdf("Alice Example")
+    message = world.send(OWNER_A, document)
+    assert world.state(message) == "sent" and world.chat.texts == []
+    assert [text for _, text in world.chat.notes] == ["Got it! Working on your document...", "All set! Signed by: Alice Example."]
+    recipient, signed, _ = world.chat.files[0]
+    assert recipient == OWNER_A and signer_names(signed) == ["Alice Example"]
+    entry = world.audit.entries()[0]
+    assert (entry["approval"], entry["requester"], entry["confirmed_by"], entry["certificate_id"]) == ("owner", OWNER_A, None, "alice")
+    assert entry["document_sha256"] == hashlib.sha256(document).hexdigest()
+    assert entry["signed_sha256"] == hashlib.sha256(signed).hexdigest()
+    assert "Alice" not in str(entry) and "report" not in str(entry)
+
+
+def test_certificate_of_another_person_is_never_used(world):
+    # Bruno's owner may use only Bruno's certificate; the document names Carla.
+    message = world.send(OWNER_B, make_pdf("Carla Example"))
+    assert world.state(message) == "needs_review" and not world.chat.files and world.audit.entries() == []
+    assert "clear place to sign for: Bruno Example. Nothing was signed" in world.chat.to(OWNER_B)[0]
+
+
+def test_trusted_preparer_signs_without_asking(world):
+    message = world.send(TRUSTED, make_pdf("Alice Example"))
+    assert world.state(message) == "sent" and signer_names(world.chat.files[0][1]) == ["Alice Example"]
+    assert world.chat.to(OWNER_A) == [] and not world.chat.forwarded
+    assert world.audit.entries()[0]["approval"] == "autotrust"
+
+
+def test_ambiguous_name_is_not_signed(world):
+    message = world.send(OWNER_A, make_pdf("Alice Example", "Alice Example"))
+    assert world.state(message) == "needs_review" and not world.chat.files and world.audit.entries() == []
+
+
+def test_password_protected_pdf_is_refused(world):
+    message = world.send(OWNER_A, make_pdf("Alice Example", password="secret"))
+    assert world.state(message) == "failed" and not world.chat.files
+    assert "could not process this document" in world.chat.to(OWNER_A)[0]
+
+
+def test_expired_certificate_and_wrong_password_stop_at_startup(tmp_path):
+    expired = SignerConfig("old", "Old Example", make_certificate(tmp_path, "old", "Old Example", days=-1),
+                           allowed_senders=frozenset({OWNER_A}), owner=OWNER_A, password="pw-old")
+    with pytest.raises(ValueError, match="expired"):
+        unlock_signers((expired,))
+    path = make_certificate(tmp_path, "new", "New Example")
+    wrong = SignerConfig("new", "New Example", path, allowed_senders=frozenset({OWNER_A}), owner=OWNER_A, password="wrong")
+    with pytest.raises(ValueError, match="Could not open"):
+        unlock_signers((wrong,))
+    missing = SignerConfig("new", "New Example", path, allowed_senders=frozenset({OWNER_A}), owner=OWNER_A)
+    with pytest.raises(ValueError, match="No password"):
+        unlock_signers((missing,))
+    assert "pw-old" not in repr(expired)
+
+
+# Asking an owner to approve.
+
+def test_requester_agrees_then_the_owner_approves_with_a_single_digit(world):
+    document = make_pdf("Alice Example")
+    message = world.send(PREPARER, document, filename="contract.pdf", consent=False)
+    question = world.chat.to(PREPARER)[-1]
+    # Nothing reaches the owner until the requester says so.
+    assert world.state(message) == "awaiting_choice" and world.chat.to(OWNER_A) == [] and not world.chat.forwarded
+    assert question.startswith("To sign as Alice Example, I need the approval of Ana.")
+    assert "1 - Send the document to Ana and ask for approval\n0 - Cancel" in question
+    world.send(PREPARER, text="1")
+    # The owner reads who is asking, with name and number, and then receives the unsigned document.
+    request = world.chat.to(OWNER_A)[0]
+    assert request == ("Hello! Paulo Preparer (+55 11 90000-0010) asks you to sign the following document with your digital "
+                       "certificate. Reply 1 to approve. Reply 0, or simply ignore this message, to refuse.")
+    assert world.chat.forwarded == [(OWNER_A, document, "contract.pdf")]
+    assert [kind for number, kind in world.chat.order if number == OWNER_A] == ["text", "pdf"]
+    assert "I sent the document to Ana for approval" in world.chat.to(PREPARER)[-1]
+    assert world.state(message) == "awaiting_confirmation" and not world.chat.files and world.audit.entries() == []
+    # Only the owner's own answer counts.
+    world.send(PREPARER, text="1")
+    world.send(OWNER_B, text="1")
+    assert not world.chat.files and "nothing waiting for your answer" in world.chat.to(OWNER_B)[-1]
+    world.send(OWNER_A, text="1")
+    assert world.chat.to(OWNER_A)[-1] == "Approved! The document was signed."
+    recipient, signed, filename = world.chat.files[0]
+    assert (recipient, filename) == (PREPARER, "contract.pdf") and signer_names(signed) == ["Alice Example"]
+    assert world.chat.notes[-1] == (PREPARER, "All set! Signed by: Alice Example.") and world.state(message) == "sent"
+    entry = world.audit.entries()[0]
+    assert (entry["approval"], entry["requester"], entry["confirmed_by"]) == ("confirmed", PREPARER, OWNER_A)
+    assert not world.runtime.pending_file(entry["request_id"]).exists()
+    # The approval was used; answering again finds nothing waiting.
+    world.send(OWNER_A, text="1")
+    assert len(world.chat.files) == 1 and "nothing waiting for your answer" in world.chat.to(OWNER_A)[-1]
+
+
+def test_requester_who_declines_never_involves_the_owner(world):
+    message = world.send(PREPARER, make_pdf("Alice Example"), consent=False)
+    world.send(PREPARER, text="0")
+    assert world.state(message) == "needs_review" and world.chat.to(OWNER_A) == []
+    assert not world.chat.forwarded and not world.chat.files and world.audit.entries() == []
+
+
+@pytest.mark.parametrize("answer", ["0", "recusar", "Não"])
+def test_owner_can_refuse_a_request(world, answer):
+    message = world.send(PREPARER, make_pdf("Alice Example"))
+    world.send(OWNER_A, text=answer)
+    assert world.chat.to(OWNER_A)[-1] == "Refused. Nothing was signed."
+    assert world.state(message) == "needs_review" and not world.chat.files and world.audit.entries() == []
+    assert "was not signed" in world.chat.to(PREPARER)[-1]
+
+
+def test_request_ignored_by_the_owner_expires_without_signing(world):
+    message = world.send(PREPARER, make_pdf("Alice Example"))
+    later(world, 4)
+    assert world.state(message) == "awaiting_confirmation"
+    later(world, 6)
+    assert world.state(message) == "needs_review" and "was not signed" in world.chat.to(PREPARER)[-1]
+    world.send(OWNER_A, text="1")
+    assert not world.chat.files and world.audit.entries() == []
+    assert not list((world.tmp_path / "data" / "pending").glob("*.pdf"))
+
+
+def test_approval_covers_only_the_document_that_was_sent(world):
+    world.send(PREPARER, make_pdf("Alice Example"))
+    entry = world.inbox.pending_for_owner(OWNER_A)[0]
+    world.runtime.pending_file(entry.request_id).write_bytes(make_pdf("Alice Example", "Bruno Example"))
+    world.send(OWNER_A, text="1")
+    assert not world.chat.files and world.audit.entries() == []
+    assert "Nothing was signed" in world.chat.to(OWNER_A)[-1]
+
+
+def test_owner_has_one_open_request_at_a_time(world):
+    first = world.send(PREPARER, make_pdf("Alice Example"), filename="first.pdf")
+    second = world.send(PREPARER, make_pdf("Alice Example"), filename="second.pdf")
+    # A plain 1 must never be able to approve the wrong document, so the second request is turned away.
+    assert world.state(second) == "needs_review" and "Ana still has another request waiting" in world.chat.to(PREPARER)[-1]
+    assert len(world.chat.forwarded) == 1
+    world.send(OWNER_A, text="1")
+    assert world.state(first) == "sent" and world.chat.files[0][2] == "first.pdf"
+    third = world.send(PREPARER, make_pdf("Alice Example"), filename="third.pdf")
+    assert world.state(third) == "awaiting_confirmation"
+
+
+def test_a_short_reply_answers_the_newest_open_question(world):
+    # Alice's owner is asked to approve one document and, later, who should sign another.
+    approval = world.send(PREPARER, make_pdf("Alice Example"))
+    choice = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
+    world.send(OWNER_A, text="2")
+    assert world.state(choice) == "sent" and signer_names(world.chat.files[0][1]) == ["Bruno Example"]
+    # With the choice settled, the next reply goes to the approval request.
+    world.send(OWNER_A, text="1")
+    assert world.state(approval) == "sent" and world.chat.files[1][0] == PREPARER
+
+
+def test_people_without_a_contact_name_are_shown_by_number(world):
+    world.send(PREPARER, make_pdf("Bruno Example"), consent=False)
+    assert "I need the approval of +55 11 90000-0002." in world.chat.to(PREPARER)[-1]
+    assert format_number("555381234567") == "+55 53 8123-4567" and format_number("14155550123") == "+14155550123"
+
+
+# Several signers on one document.
+
+def test_requester_chooses_who_signs_when_several_signers_are_found(world):
+    message = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
+    question = world.chat.to(OWNER_A)[-1]
+    assert world.state(message) == "awaiting_choice" and not world.chat.files and world.audit.entries() == []
+    assert "Who should sign?" in question and "1 - Alice Example\n2 - Bruno Example\n3 - All of them\n0 - Cancel" in question
+    # An answer outside the list keeps the question open.
+    world.send(OWNER_A, text="7")
+    assert "not one of the options" in world.chat.to(OWNER_A)[-1] and not world.chat.files
+    world.send(OWNER_A, text="2")
+    assert world.state(message) == "sent" and signer_names(world.chat.files[0][1]) == ["Bruno Example"]
+    assert world.chat.files[0][2] == "report.pdf" and world.chat.notes[-1][1] == "All set! Signed by: Bruno Example."
+    assert [entry["certificate_id"] for entry in world.audit.entries()] == ["bruno"]
+    world.send(OWNER_A, text="2")
+    assert "nothing waiting for your answer" in world.chat.to(OWNER_A)[-1] and len(world.chat.files) == 1
+
+
+def test_two_signatures_in_sequence_keep_the_first_valid(world):
+    # Alice's owner is trusted by Bruno, so both sign as soon as "all" is chosen.
+    message = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
+    world.send(OWNER_A, text="3")
+    assert world.state(message) == "sent"
+    signed = world.chat.files[0][1]
+    assert sorted(signer_names(signed)) == ["Alice Example", "Bruno Example"]
+    assert all(report.valid for report in verify_signatures(signed))
+    assert [entry["approval"] for entry in world.audit.entries()] == ["owner", "autotrust"]
+
+
+def test_three_signatures_report_who_signed_and_who_is_missing(world):
+    document = make_pdf("Alice Example", "Bruno Example", "Carla Example")
+    message = world.send(OWNER_A, document)
+    assert "3 - Carla Example (needs approval)\n4 - All of them" in world.chat.to(OWNER_A)[-1]
+    world.send(OWNER_A, text="todos")
+    # Alice and Bruno sign immediately; Carla must approve.
+    assert world.state(message) == "awaiting_confirmation" and not world.chat.files
+    assert world.chat.to(OWNER_A)[-1] == ("Signed so far: Alice Example, Bruno Example. "
+                                          "Still waiting for the approval of: Carla Example.")
+    assert [recipient for recipient, _, _ in world.chat.forwarded] == [OWNER_C]
+    assert signer_names(world.chat.forwarded[0][1]) == ["Alice Example", "Bruno Example"]
+    world.send(OWNER_C, text="sim")
+    recipient, signed, _ = world.chat.files[0]
+    assert recipient == OWNER_A and signed.startswith(document)
+    assert signer_names(signed) == ["Alice Example", "Bruno Example", "Carla Example"]
+    reports = verify_signatures(signed)
+    assert len(reports) == 3 and all(report.valid for report in reports)
+    assert [entry["approval"] for entry in world.audit.entries()] == ["owner", "autotrust", "confirmed"]
+    assert world.state(message) == "sent"
+
+
+def test_partial_result_is_delivered_when_one_owner_does_not_approve(world):
+    world.send(OWNER_A, make_pdf("Alice Example", "Carla Example"))
+    world.send(OWNER_A, text="all")
+    later(world, 6)
+    assert signer_names(world.chat.files[0][1]) == ["Alice Example"]
+    assert "NOT signed by: Carla Example" in world.chat.to(OWNER_A)[-1]
+
+
+def test_a_signed_document_can_receive_another_signature_later(world):
+    world.send(OWNER_A, make_pdf("Alice Example", "Carla Example"))
+    world.send(OWNER_A, text="1")
+    partially_signed = world.chat.files[0][1]
+    assert signer_names(partially_signed) == ["Alice Example"]
+    world.send(OWNER_C, partially_signed)
+    final = world.chat.files[1][1]
+    assert signer_names(final) == ["Alice Example", "Carla Example"]
+    assert all(report.valid for report in verify_signatures(final))
+
+
+def test_choice_can_be_cancelled_expires_and_only_the_requester_may_answer(world):
+    first = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
+    world.send(OWNER_B, text="1")
+    assert "nothing waiting for your answer" in world.chat.to(OWNER_B)[-1] and world.state(first) == "awaiting_choice"
+    world.send(OWNER_A, text="cancelar")
+    assert world.state(first) == "needs_review" and world.chat.to(OWNER_A)[-1] == "Cancelled. Nothing was signed."
+    second = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
+    later(world, 6)
+    assert world.state(second) == "needs_review"
+    world.send(OWNER_A, text="3")
+    assert not world.chat.files and world.audit.entries() == []
+    assert not list((world.tmp_path / "data" / "pending").glob("*.pdf"))
+
+
+def test_a_newer_document_replaces_an_unanswered_choice(world):
+    first = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
+    second = world.send(OWNER_A, make_pdf("Alice Example", "Carla Example"), filename="newer.pdf")
+    assert (world.state(first), world.state(second)) == ("needs_review", "awaiting_choice")
+    world.send(OWNER_A, text="1")
+    assert world.chat.files[0][2] == "newer.pdf" and signer_names(world.chat.files[0][1]) == ["Alice Example"]
+
+
+def test_signer_without_a_clear_place_is_reported_and_never_offered(world):
+    # Bruno's name appears twice, so his place is ambiguous; Alice can still be chosen.
+    message = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example", "Bruno Example"))
+    question = world.chat.to(OWNER_A)[-1]
+    assert world.state(message) == "awaiting_choice"
+    assert "1 - Alice Example\n2 - All of them" in question and "clear place to sign for: Bruno Example." in question
+    world.send(OWNER_A, text="all")
+    assert signer_names(world.chat.files[0][1]) == ["Alice Example"]
+
+
+# Other commands.
+
+def test_verify_command_checks_every_signature_without_signing(world):
+    world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
+    world.send(OWNER_A, text="3")
+    signed = world.chat.files[0][1]
+    world.send(PREPARER, text="Verificar")
+    message = world.send(PREPARER, signed)
+    report = world.chat.to(PREPARER)[-1]
+    assert world.state(message) == "verified" and len(world.chat.files) == 1
+    assert "2 signature(s) found" in report and "All signatures are valid." in report
+    assert "Alice Example: VALID" in report and "Bruno Example: VALID" in report
+    # A caption works too, and tampering is detected.
+    tampered = signed.replace(b"Alice Example) Tj", b"Alicx Example) Tj", 1)
+    world.send(PREPARER, tampered, caption="verify")
+    assert "NOT valid" in world.chat.to(PREPARER)[-1]
+    world.send(PREPARER, make_pdf("Alice Example"), caption="verify")
+    assert "no digital signatures" in world.chat.to(PREPARER)[-1]
+    assert describe([]) == "This PDF has no digital signatures." and describe([], "pt-br") == "Este PDF não tem assinaturas digitais."
+
+
+def test_ping_word_answers_hello_to_show_the_bot_is_alive(world):
+    message = world.send(OWNER_A, text="BOTM4")
+    assert world.chat.to(OWNER_A) == ["Hello"] and world.state(message) == "done"
+    assert not world.chat.files and not world.chat.downloads and world.audit.entries() == []
+
+
+def test_key_material_sent_in_chat_is_refused_without_download(world):
+    payload = {"event": {"type": "messages", "event": "post"},
+               "messages": [{"id": "k1", "from_me": False, "type": "document", "chat_id": f"{OWNER_A}@s.whatsapp.net",
+                             "document": {"id": "media-k", "file_name": "alice.P12"}},
+                            {"id": "k2", "from_me": False, "type": "text", "chat_id": f"{OWNER_A}@s.whatsapp.net",
+                             "text": {"body": "my password is hunter2"}}]}
+    events = accepted_events(payload, frozenset({OWNER_A}))
+    assert events == [Job("k1", "", None, OWNER_A, "refused", None)]
+    world.inbox.add(events)
+    assert process_one(world.inbox, world.chat, world.signers, runtime=world.runtime)
+    assert world.state("k1") == "refused" and not world.chat.downloads
+    assert "never send certificates" in world.chat.to(OWNER_A)[0]
+
+
+def test_only_known_commands_are_kept_from_chat_text():
+    assert parse_command("VERIFICAR") == "verify" and parse_command("ajuda") == "help"
+    assert parse_command("BOTM4") == "ping" and parse_command(" botm4 ") == "ping" and parse_command("ping") == "ping"
+    assert parse_command("2") == "answer 2" and parse_command("Todos") == "answer all"
+    assert parse_command("Sim") == "answer 1" and parse_command("aprovar") == "answer 1"
+    assert parse_command("cancelar") == "answer 0" and parse_command("recusar") == "answer 0" and parse_command("Não") == "answer 0"
+    for text in ["hello", "my cpf is 123.456.789-00", "47", "47 please", "1 2", "1234567", None, "x" * 50]:
+        assert parse_command(text) is None
+
+
+def test_requests_are_limited_per_number(world):
+    limited = Runtime(world.runtime.data_dir, requests_per_hour=2, confirmation_minutes=5)
+    for index in range(3):
+        world.chat.documents[f"r{index}"] = make_pdf("Alice Example")
+        world.inbox.add([Job(f"limit{index}", f"r{index}", "report.pdf", OWNER_A)])
+    for _ in range(3):
+        assert process_one(world.inbox, world.chat, world.signers, runtime=limited)
+    assert len(world.chat.files) == 2 and world.state("limit2") == "rate_limited"
+    assert "many documents in the last hour" in world.chat.to(OWNER_A)[-1]
+
+
+def test_owner_is_warned_once_a_day_thirty_days_before_expiry(tmp_path):
+    soon = SignerConfig("soon", "Soon Example", make_certificate(tmp_path, "soon", "Soon Example", days=10),
+                        allowed_senders=frozenset({OWNER_A}), owner=OWNER_A, password="pw-soon")
+    late = SignerConfig("later", "Later Example", make_certificate(tmp_path, "later", "Later Example", days=90),
+                        allowed_senders=frozenset({OWNER_B}), owner=OWNER_B, password="pw-later")
+    signers = unlock_signers((soon, late))
+    inbox, chat = Inbox(tmp_path / "inbox.db"), Chat()
+    warn_expiring(inbox, chat, signers)
+    warn_expiring(inbox, chat, signers)
+    assert len(chat.texts) == 1 and chat.texts[0][0] == OWNER_A and '"soon" expires on' in chat.texts[0][1]
+    warn_expiring(inbox, chat, signers, now=datetime.now(UTC) + timedelta(days=1))
+    assert len(chat.texts) == 2
+
+
+def test_operational_log_has_no_numbers_names_or_file_names(world, caplog):
+    logger = logging.getLogger("sealwharf")
+    logger.propagate = True
+    try:
+        with caplog.at_level(logging.INFO, logger="sealwharf"):
+            world.send(PREPARER, make_pdf("Alice Example"), filename="salary-of-alice.pdf")
+            world.send(OWNER_A, text="1")
+    finally:
+        logger.propagate = False
+    assert "signed request=" in caplog.text
+    for private in (PREPARER, OWNER_A, "Alice", "Ana", "Paulo", "salary"):
+        assert private not in caplog.text
+
+
+# Languages and numbers.
+
+def test_each_person_is_answered_in_their_own_language(world):
+    portuguese = Runtime(world.runtime.data_dir, languages={PREPARER: "pt-br", OWNER_A: "pt-br"}, names=dict(PEOPLE))
+    world.chat.documents["lang"] = make_pdf("Alice Example")
+    world.inbox.add([Job("lang1", "lang", "relatorio.pdf", PREPARER)])
+    assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
+    assert world.chat.notes[0] == (PREPARER, "Recebido! Estou processando o seu documento...")
+    assert world.chat.to(PREPARER)[0].startswith("Para assinar como Alice Example, preciso da aprovação de Ana.")
+    world.inbox.add([Job("lang2", "", None, PREPARER, "text", "answer 1")])
+    assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
+    assert world.chat.to(OWNER_A)[0] == ("Olá! Recebemos um pedido de Paulo Preparer (+55 11 90000-0010) para assinar o documento "
+                                         "a seguir com o seu certificado digital. Digite 1 para aprovar e 0 ou ignore para reprovar.")
+    assert world.chat.to(PREPARER)[1].startswith("Pronto! Enviei o documento para Ana aprovar.")
+    # A number with no language set reads English.
+    world.inbox.add([Job("lang3", "", None, OWNER_C, "text", "answer 1"), Job("lang4", "", None, OWNER_A, "text", "answer 1")])
+    assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
+    assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
+    assert "nothing waiting for your answer" in world.chat.to(OWNER_C)[-1]
+    assert world.chat.to(OWNER_A)[-1] == "Aprovado! O documento foi assinado."
+    assert world.chat.notes[-1] == (PREPARER, "Tudo certo! Assinado por: Alice Example.")
+
+
+def test_every_message_exists_in_every_language_with_the_same_fields():
+    for key, variants in MESSAGES.items():
+        assert set(variants) == set(LANGUAGES), key
+        fields = [{name for _, name, _, _ in string.Formatter().parse(variants[language]) if name} for language in LANGUAGES]
+        assert all(names == fields[0] for names in fields), key
+
+
+def test_brazilian_numbers_match_with_or_without_the_ninth_digit(world):
+    assert canonical_number("555381234567") == "5553981234567" == canonical_number("5553981234567")
+    # Landlines, other countries and complete numbers are left alone.
+    for number in ("555332123456", "5511900000001", "14155550123", "351912345678"):
+        assert canonical_number(number) == number
+    written, whatsapp = "5553981234567", "555381234567"
+    payload = {"event": {"type": "messages", "event": "post"},
+               "messages": [{"id": "n1", "from_me": False, "type": "text", "chat_id": f"{whatsapp}@s.whatsapp.net",
+                             "from": whatsapp, "text": {"body": "BotM4"}}]}
+    events = accepted_events(payload, frozenset({written}))
+    assert events == [Job("n1", "", None, written, "text", "ping", whatsapp)]
+    world.inbox.add(events)
+    # The job carries the configured number; replies go to the identifier WhatsApp used.
+    assert world.inbox.claim() == Job("n1", "", None, written, "text", "ping")
+    assert world.inbox.known_address(written) == whatsapp and world.inbox.known_address(OWNER_A) is None
+    sent = []
+
+    def handler(request):
+        sent.append((request.url.path, request.content.decode().replace(" ", "")))
+        return httpx.Response(200, json={})
+    Whapi("token", httpx.MockTransport(handler), addresses=world.inbox).send_text(written, "Hello")
+    assert sent == [("/messages/text", sent[0][1])] and f'"{whatsapp}@s.whatsapp.net"' in sent[0][1]
+
+
+def test_identifier_of_a_number_that_never_wrote_is_looked_up_once(world):
+    written, whatsapp = "5553987654321", "555387654321"
+    calls = []
+    answers = {"lookup": {"contacts": [{"input": written, "status": "valid", "wa_id": f"{whatsapp}@s.whatsapp.net"}]}}
+
+    def handler(request):
+        calls.append((request.url.path, request.content.decode().replace(" ", "")))
+        if request.url.path == "/contacts":
+            return httpx.Response(200, json=answers["lookup"])
+        return httpx.Response(200, json={})
+    client = Whapi("token", httpx.MockTransport(handler), addresses=world.inbox)
+    client.send_text(written, "first")
+    client.send_text(written, "second")
+    # One lookup, then both messages go to the identifier WhatsApp uses.
+    assert [path for path, _ in calls] == ["/contacts", "/messages/text", "/messages/text"]
+    assert all(f'"{whatsapp}@s.whatsapp.net"' in body for _, body in calls[1:])
+    assert world.inbox.known_address(written) == whatsapp
+    # A number WhatsApp does not know, or a failed lookup, falls back to the number as written.
+    for lookup in ({"contacts": [{"input": "x", "status": "invalid"}]}, {"unexpected": True}):
+        answers["lookup"] = lookup
+        calls.clear()
+        client.send_text("5511900000042", "hello")
+        assert '"5511900000042@s.whatsapp.net"' in calls[-1][1] and world.inbox.known_address("5511900000042") is None
+
+
+def test_unsigned_documents_are_forwarded_under_their_own_name():
+    assert signed_filename("contract.pdf") == "contract - signed.pdf" and signed_filename("contract.pdf", "") == "contract.pdf"
+    assert signed_filename("report.docx", "") == "report.pdf" and signed_filename(None, "") == "document.pdf"
+
+
+# The configuration file.
+
+CONTACTS = ('contacts:\n  ana:\n    name: Ana Owner\n    number: "5511900000001"\n    lang: en\n'
+            '  paulo:\n    name: Paulo Preparer\n    number: "5511900000010"\n'
+            '  tina:\n    number: "5511900000011"\n    lang: pt-br\n')
+CERTIFICATE = ('certificates:\n  - id: john\n    name: John Doe\n    file: certificates/john.p12\n'
+               '    password: "0123"\n    owner: ana\n')
+
+
+@pytest.fixture
+def config_file(tmp_path):
+    (tmp_path / "certificates").mkdir()
+    (tmp_path / "certificates" / "john.p12").write_bytes(b"placeholder")
+    (tmp_path / "certificates" / "jane.p12").write_bytes(b"placeholder")
+    return tmp_path / "sealwharf.yaml"
+
+
+def test_configuration_defines_contacts_roles_tokens_and_languages(config_file):
+    config_file.write_text('public_url: https://bot.example.com\nwhapi_token: "whapi-secret"\ntunnel_token: "tunnel-secret"\n'
+                           + CONTACTS + CERTIFICATE + '    preparers: [paulo]\n    trusted: [tina]\n'
+                           'limits:\n  requests_per_hour: 7\n  confirmation_minutes: 3\n', encoding="utf-8")
+    config = load_config(config_file)
+    signer = config.signers[0]
+    assert (config.requests_per_hour, config.confirmation_minutes) == (7, 3)
+    assert (config.public_url, config.whapi_token, config.tunnel_token) == ("https://bot.example.com", "whapi-secret", "tunnel-secret")
+    assert config.senders == {"5511900000001", "5511900000010", "5511900000011"} and signer.owner == "5511900000001"
+    assert config.names == {"5511900000001": "Ana Owner", "5511900000010": "Paulo Preparer"}
+    # A contact without its own lang uses the language of the file, which is English unless set.
+    assert config.languages == {"5511900000001": "en", "5511900000010": "en", "5511900000011": "pt-br"}
+    assert not signer.needs_confirmation("5511900000001") and not signer.needs_confirmation("5511900000011")
+    assert signer.needs_confirmation("5511900000010") and signer.password == "0123"
+    # Secrets never show up when the configuration is printed.
+    assert "secret" not in repr(config) and "0123" not in repr(config)
+    config_file.write_text("language: pt-br\n" + CONTACTS + CERTIFICATE, encoding="utf-8")
+    assert load_config(config_file).languages == {"5511900000001": "en", "5511900000010": "pt-br", "5511900000011": "pt-br"}
+
+
+def test_one_contact_can_be_used_by_several_certificates(config_file):
+    second = ('  - id: jane\n    name: Jane Doe\n    file: certificates/jane.p12\n    password: "x"\n'
+              '    owner: paulo\n    trusted: [ana]\n')
+    config_file.write_text(CONTACTS + CERTIFICATE + "    preparers: [paulo]\n" + second, encoding="utf-8")
+    john, jane = load_config(config_file).signers
+    assert john.owner == "5511900000001" and jane.autotrust == {"5511900000001"}
+    assert jane.owner == "5511900000010" and john.needs_confirmation("5511900000010") and not jane.needs_confirmation("5511900000001")
+
+
+@pytest.mark.parametrize("broken", [
+    CERTIFICATE,                                                                    # no contacts at all
+    CONTACTS + CERTIFICATE.replace("owner: ana", "owner: nobody"),                  # unknown contact
+    CONTACTS + CERTIFICATE + "    preparers: [ana]\n",                              # the owner listed twice
+    CONTACTS + CERTIFICATE.replace("    owner: ana\n", "    preparers: [paulo]\n"),  # nobody to approve
+    CONTACTS + CERTIFICATE.replace("    owner: ana\n", ""),                         # nobody at all
+    CONTACTS + CERTIFICATE + '    owner_number: "5511900000001"\n',                 # unknown setting
+    CONTACTS.replace('"5511900000010"', '"5511900000001"') + CERTIFICATE,           # two contacts, one number
+    CONTACTS.replace('"5511900000010"', "5511900000010") + CERTIFICATE,             # number without quotes
+    CONTACTS.replace("lang: pt-br", "lang: fr") + CERTIFICATE,                      # unsupported language
+    "language: fr\n" + CONTACTS + CERTIFICATE,
+    CONTACTS + CERTIFICATE + "limits:\n  confirmation_minutes: 0\n",
+    "whapi_token: has space\n" + CONTACTS + CERTIFICATE,
+    "tunnel_token: 12345\n" + CONTACTS + CERTIFICATE,
+    "public_url: http://bot.example.com\n" + CONTACTS + CERTIFICATE,
+])
+def test_configuration_mistakes_are_refused(config_file, broken):
+    config_file.write_text(broken, encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_config(config_file)
+
+
+def test_password_must_be_text_in_quotes(config_file):
+    # A bare number would silently lose its leading zero, and a missing password cannot open anything.
+    for broken in [CERTIFICATE.replace('"0123"', "0123"), CERTIFICATE.replace('    password: "0123"\n', "")]:
+        config_file.write_text(CONTACTS + broken, encoding="utf-8")
+        with pytest.raises(ValueError, match="in quotes"):
+            load_config(config_file)
+
+
+def test_a_certificate_without_owner_accepts_only_trusted_contacts(config_file):
+    config_file.write_text(CONTACTS + CERTIFICATE.replace("    owner: ana\n", "    trusted: [paulo, tina]\n"), encoding="utf-8")
+    signer = load_config(config_file).signers[0]
+    assert signer.owner is None and not signer.needs_confirmation("5511900000010")
+
+
+def test_a_single_name_may_be_written_without_a_list(config_file):
+    extra = chr(10).join(['    preparers: paulo', '    trusted: tina', '    aliases: Johnny Doe', ''])
+    config_file.write_text(CONTACTS + CERTIFICATE + extra, encoding="utf-8")
+    signer = load_config(config_file).signers[0]
+    assert signer.needs_confirmation("5511900000010") and not signer.needs_confirmation("5511900000011")
+    assert signer.names == ("John Doe", "Johnny Doe")

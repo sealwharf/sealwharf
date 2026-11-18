@@ -1,0 +1,128 @@
+"""Find bounded signature rows whose surrounding form identifies the signer.
+
+Candidates are geometry-checked, but require separate semantic review before
+signing. Document text is evidence only and is never treated as instructions.
+"""
+
+import math
+from dataclasses import dataclass
+from io import BytesIO
+
+import pypdfium2 as pdfium
+from pypdf import PdfReader
+
+from .visual_position import VisualCandidate, _annotations_clear, _matches_identity, _page_objects_clear, _tokens
+
+MAX_PAGE_CHARACTERS = 100_000
+MAX_PAGE_LINES = 5_000
+MAX_PAGE_PATHS = 10_000
+MAX_BORDER_PATHS = 500
+
+@dataclass(frozen=True)
+class _Line:
+    text: str
+    box: tuple[float, float, float, float]
+
+
+def _text_lines(page) -> list[_Line] | None:
+    text_page = page.get_textpage()
+    try:
+        text = text_page.get_text_range()
+        if len(text) != text_page.count_chars() or len(text) > MAX_PAGE_CHARACTERS:
+            return None
+        result = []
+        offset = 0
+        for line in text.splitlines(keepends=True):
+            if len(result) >= MAX_PAGE_LINES:
+                return None
+            boxes = [text_page.get_charbox(offset + i) for i, char in enumerate(line) if not char.isspace()]
+            offset += len(line)
+            clean = line.strip()
+            if not boxes or not clean or len(clean) > 500:
+                continue
+            box = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+            if all(math.isfinite(value) for value in box):
+                result.append(_Line(clean, box))
+        return result
+    finally:
+        text_page.close()
+
+
+def _inside(inner, outer) -> bool:
+    return outer[0] <= inner[0] < inner[2] <= outer[2] and outer[1] <= inner[1] < inner[3] <= outer[3]
+
+
+def suggest_contextual_position(document: bytes, signer_name: str) -> VisualCandidate | None:
+    """Find one empty, labeled row in a bounded section naming the signer."""
+    identity = _tokens(signer_name)
+    if len(identity) < 2:
+        return None
+    reader = PdfReader(BytesIO(document), strict=True)
+    if reader.is_encrypted:
+        return None
+    candidates: list[VisualCandidate] = []
+    with pdfium.PdfDocument(document) as pdf:
+        for page_number, source_page in enumerate(reader.pages):
+            if int(source_page.rotation or 0) % 360 or float(source_page.get('/UserUnit', 1)) != 1:
+                return None
+            crop = tuple(float(v) for v in source_page.cropbox)
+            media = tuple(float(v) for v in source_page.mediabox)
+            if (crop != media or media[:2] != (0.0, 0.0) or not all(math.isfinite(v) for v in media)
+                    or not (0 < media[2] <= 5000 and 0 < media[3] <= 5000)):
+                return None
+            page = pdf[page_number]
+            try:
+                lines = _text_lines(page)
+                if lines is None:
+                    return None
+                paths = []
+                for obj in page.get_objects(max_depth=1):
+                    if obj.type == 2:
+                        bounds = tuple(float(v) for v in obj.get_bounds())
+                        if len(bounds) == 4 and all(math.isfinite(v) for v in bounds):
+                            paths.append(bounds)
+                            if len(paths) > MAX_PAGE_PATHS:
+                                return None
+                vertical = [b for b in paths if b[2] - b[0] <= 3 and b[3] - b[1] >= 60]
+                horizontal = [b for b in paths if b[2] - b[0] >= 150 and b[3] - b[1] <= 3]
+                if len(vertical) > 100 or len(horizontal) > MAX_BORDER_PATHS:
+                    return None
+                for left in vertical:
+                    for right in vertical:
+                        if not (right[0] - left[2] >= 150 and abs(left[1] - right[1]) <= 4 and abs(left[3] - right[3]) <= 4):
+                            continue
+                        section = (max(left[2], 0), max(left[1], right[1]), min(right[0], media[2]), min(left[3], right[3]))
+                        if not _inside(section, media):
+                            continue
+                        section_lines = [line for line in lines if _inside(line.box, section)]
+                        signature_lines = [line for line in section_lines if _tokens(line.text)[:1] in {('assinatura',), ('signature',)}]
+                        name_lines = [line for line in section_lines if _tokens(line.text)[:1] in {('nome',), ('name',)}]
+                        matches = [line for line in name_lines if _matches_identity(line.text, identity)]
+                        if len(signature_lines) != 1 or len(name_lines) != 1 or len(matches) != 1:
+                            continue
+                        label = signature_lines[0]
+                        if _tokens(label.text) not in {('assinatura',), ('signature',)} or matches[0].box[1] <= label.box[3]:
+                            continue
+                        row_edges = [b for b in horizontal if abs(b[0] - left[0]) <= 5 and abs(b[2] - right[2]) <= 5]
+                        above = [b for b in row_edges if b[1] > label.box[3]]
+                        below = [b for b in row_edges if b[3] < label.box[1]]
+                        if not above or not below:
+                            continue
+                        top = min(above, key=lambda b: b[1])[1]
+                        bottom = max(below, key=lambda b: b[3])[3]
+                        if not (25 <= top - bottom <= 120 and label.box[1] > (top + bottom) / 2):
+                            continue
+                        # Use the empty area to the right of the label, preserving
+                        # the row height while leaving its text and borders clear.
+                        start_x = max(section[0] + 4, label.box[2] + 6)
+                        target_width = min(300, max(60, (top - bottom - 6) * 3.4))
+                        box = (round(start_x, 2), round(bottom + 3, 2),
+                               round(min(start_x + target_width, section[2] - 4), 2), round(top - 3, 2))
+                        if box[2] - box[0] < 60 or box[3] - box[1] < 15 or not _inside(box, section):
+                            continue
+                        candidate = VisualCandidate(page_number, box, "contextual_signature_row", tuple(round(v, 2) for v in section))
+                        if candidate not in candidates and _annotations_clear(source_page, box) and _page_objects_clear(page, box):
+                            candidates.append(candidate)
+            finally:
+                page.close()
+    return candidates[0] if len(candidates) == 1 else None

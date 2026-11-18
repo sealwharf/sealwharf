@@ -1,0 +1,50 @@
+name: sealwharf
+
+services:
+  sealwharf:
+    build: .
+    image: sealwharf:local
+    restart: unless-stopped
+    init: true
+    environment:
+      SEALWHARF_OLLAMA_URL: ${SEALWHARF_OLLAMA_URL:-http://127.0.0.1:11434}
+      SEALWHARF_ALLOW_SETTINGS_DEFAULTS: ${SEALWHARF_ALLOW_SETTINGS_DEFAULTS:-false}
+      LD_LIBRARY_PATH: /data/pkcs11
+    volumes:
+      - ./config:/config:ro
+      - data:/data
+      - pcsc:/run/pcscd
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Optional smart-card reader for USB tokens: docker compose --profile token up -d
+  reader:
+    profiles: [token]
+    build:
+      context: .
+      target: reader
+    image: sealwharf-reader:local
+    restart: unless-stopped
+    device_cgroup_rules:
+      - "c 189:* rmw"
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - pcsc:/run/pcscd
+
+  # Optional local vision model: docker compose --profile ai up -d
+  ollama:
+    profiles: [ai]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - models:/root/.ollama
+
+volumes:
+  data:
+  pcsc:
+  models:

@@ -1,0 +1,52 @@
+# Copy this file to config/sealwharf.yaml and fill it in. It is the only file to edit.
+# It holds passwords and tokens, so keep it private; Git ignores it.
+# After editing, check it with: docker compose run --rm sealwharf check
+
+public_url: https://bot.example.com # the public hostname of your Cloudflare tunnel
+whapi_token: "paste-the-channel-token"
+tunnel_token: "paste-the-cloudflare-tunnel-token"
+language: en                        # en or pt-br; used for contacts that set no lang of their own
+
+# Everyone who may talk to the bot, registered once and referred to by id below.
+contacts:
+  john:
+    name: John Doe                  # how the bot refers to this person in messages
+    number: "5511999999999"         # digits only, with country and area codes, in quotes
+    lang: en
+  jane:
+    name: Jane Doe
+    number: "5521888888888"
+    lang: pt-br
+  mary:
+    name: Mary Major
+    number: "5531777777777"
+
+certificates:
+  - id: john                        # short alias, used in logs and the audit record
+    name: John Doe                  # name on the stamp; must match the certificate and the document
+                                    # (capitals and accents do not matter: José and JOSE are the same)
+    file: certificates/john.p12     # relative to the config folder
+    password: "certificate-password" # always in quotes
+    owner: john                     # signs, and approves requests from preparers
+    preparers: [jane]               # send documents; each request waits for the owner (one name may be written alone)
+    trusted: [mary]                 # send documents that are signed without asking the owner
+    # Optional:
+    # aliases: ["Johnny Doe"]       # other spellings found in documents, using names from the certificate
+    # logo: logos/company.png       # PNG or JPEG under config/logos
+    # logo_scale: 0.5               # 0.1 to 1.0
+    # visual_review: ollama         # needs the optional local model service
+    # timestamp_url: "https://timestamp.example/tsa"
+    # trust_roots: ["trust/root-ca.crt"]
+
+  # A certificate on a USB token instead of a file. Needs the optional reader service.
+  - id: jane
+    name: Jane Doe
+    token:
+      module: /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so  # or a vendor library under /config/pkcs11/
+    password: "123456"              # the token PIN, in quotes
+    owner: jane
+    preparers: [john]
+
+limits:
+  requests_per_hour: 20             # documents accepted from each number
+  confirmation_minutes: 5           # how long a question stays open for an answer
