@@ -99,8 +99,7 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 | --- | --- |
 | A PDF or Word document | Signs it and sends it back. |
 | `1`, `2`, `0`… or `sim`, `não`, `todos` | Takes it as your answer to the question it just asked. |
-| `verify` (or `verificar`), then a PDF | Checks the signatures of that PDF, without signing. |
-| `help` (or `ajuda`) | Explains how to use it. |
+| A PDF with the caption `verify` (or `verificar`) | Checks the signatures of that PDF, without signing. |
 | `BOTM4` | Answers `Hello`, to show it is working. |
 
 **When more than one person can sign.** If the document has the names of several signers you may use, the bot asks who should sign and you reply with a number: one of them, all of them, or cancel.
@@ -291,6 +290,7 @@ To get exactly the same result as on your computer, do one of these:
 
 ## Good to know
 
+- **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the word `BOTM4` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
 - **Privacy.** Documents and certificates are processed on your computer. Whapi and Cloudflare only carry the messages. Certificates and passwords are never accepted through the chat: a `.p12` file sent to the bot is refused without being opened.
 - **Record of signatures.** Every signature is recorded with the time, who asked, who approved and the fingerprint of the document. Read the record with `docker compose exec sealwharf cat /data/audit.jsonl`.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.

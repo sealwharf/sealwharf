@@ -16,11 +16,10 @@ from .locking import WorkerLock, worker_lock_path
 ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
 SECRET_FILE = re.compile(r"\.(p12|pfx|pem|key|jks|keystore)$", re.IGNORECASE)
 VERIFY_WORDS = frozenset({"verify", "verificar", "check"})
-HELP_WORDS = frozenset({"help", "ajuda", "status"})
 YES_WORDS = frozenset({"yes", "sim", "approve", "aprovar", "aprovo", "ok"})
 NO_WORDS = frozenset({"no", "nao", "reject", "recusar", "reprovar", "cancel", "cancelar"})
 ALL_WORDS = frozenset({"all", "todos", "todas", "tudo"})
-PING_WORDS = frozenset({"botm4", "ping"})
+PING_WORDS = frozenset({"botm4"})
 
 
 class Job(NamedTuple):
@@ -55,7 +54,10 @@ class SigningRequestRecord(NamedTuple):
 
 
 def parse_command(text: object) -> str | None:
-    """Reduce a chat message to a known command, or None so it is discarded."""
+    """Reduce a chat message to the ping or an answer, or None so it is discarded.
+
+    The number may also be used for ordinary conversations, which are never kept.
+    """
     if not isinstance(text, str) or len(text) > 40:
         return None
     words = re.sub(r"[^a-z0-9 ]", "", text.strip().casefold().replace("ã", "a")).split()
@@ -63,17 +65,18 @@ def parse_command(text: object) -> str | None:
         # One digit, or a plain word, answers the question the bot last asked this number.
         word = words[0]
         return "answer " + ("1" if word in YES_WORDS else "0" if word in NO_WORDS else "all" if word in ALL_WORDS else word)
-    if len(words) == 1 and words[0] in VERIFY_WORDS:
-        return "verify"
-    if len(words) == 1 and words[0] in HELP_WORDS:
-        return "help"
     if len(words) == 1 and words[0] in PING_WORDS:
         return "ping"
     return None
 
 
+def asks_verification(caption: object) -> bool:
+    """Whether the caption of a document asks to check its signatures instead of signing it."""
+    return isinstance(caption, str) and caption.strip().casefold() in VERIFY_WORDS
+
+
 def accepted_events(payload: object, senders: frozenset[str]) -> list[Job]:
-    """Keep documents and known commands sent directly by configured numbers."""
+    """Keep documents, the ping and answers sent directly by configured numbers; drop everything else."""
     if not isinstance(payload, dict):
         return []
     event = payload.get("event")
@@ -116,7 +119,7 @@ def accepted_events(payload: object, senders: frozenset[str]) -> list[Job]:
             # Key material must never be fetched, stored or processed.
             result.append(Job(message_id, "", None, sender, "refused", None, seen))
             continue
-        body = "verify" if parse_command(document.get("caption")) == "verify" else None
+        body = "verify" if asks_verification(document.get("caption")) else None
         result.append(Job(message_id, media_id, filename, sender, "document", body, seen))
     return result
 

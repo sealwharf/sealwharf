@@ -9,14 +9,6 @@ DEFAULT_LANGUAGE = "en"
 
 MESSAGES = {
     "hello": {"en": "Hello", "pt-br": "Olá"},
-    "help": {
-        "en": "Hello! Send me a PDF or Word document and I will sign it. If more than one person can sign it, "
-              "I will ask who should. To check the signatures of a PDF, send the word \"verify\" and then the PDF. "
-              "For your safety, never send certificates or passwords here.",
-        "pt-br": "Olá! Envie um PDF ou documento do Word e eu assino. Se mais de uma pessoa puder assinar, "
-                 "eu pergunto quem deve. Para conferir as assinaturas de um PDF, envie a palavra \"verificar\" e depois o PDF. "
-                 "Para a sua segurança, nunca envie certificados ou senhas por aqui.",
-    },
     "received": {
         "en": "Got it! Working on your document...",
         "pt-br": "Recebido! Estou processando o seu documento...",
@@ -81,10 +73,6 @@ MESSAGES = {
         "en": "{owner} still has another request waiting for an answer. Please send the document again in a few minutes.",
         "pt-br": "{owner} ainda tem outro pedido aguardando resposta. Envie o documento novamente em alguns minutos.",
     },
-    "answer_none": {
-        "en": "There is nothing waiting for your answer right now. If you were answering a request, it may have expired.",
-        "pt-br": "Não há nada aguardando a sua resposta agora. Se você estava respondendo a um pedido, ele pode ter expirado.",
-    },
     "answer_invalid": {
         "en": "That is not one of the options. Please reply with one of the numbers I listed.",
         "pt-br": "Essa não é uma das opções. Responda com um dos números que eu listei.",
@@ -133,10 +121,6 @@ MESSAGES = {
         "pt-br": "Atenção: o certificado \"{certificate}\" vence em {date} (faltam {days} dia(s)). Renove-o para continuar assinando.",
     },
     # Checking the signatures of a PDF.
-    "verify_prompt": {
-        "en": "Sure! Send me the PDF within 5 minutes. I will check its signatures without signing it.",
-        "pt-br": "Claro! Envie o PDF em até 5 minutos. Vou conferir as assinaturas sem assinar.",
-    },
     "verify_only_pdf": {"en": "I can only check PDF files.", "pt-br": "Só consigo conferir arquivos PDF."},
     "verify_none": {"en": "This PDF has no digital signatures.", "pt-br": "Este PDF não tem assinaturas digitais."},
     "verify_found": {"en": "{count} signature(s) found:", "pt-br": "{count} assinatura(s) encontrada(s):"},

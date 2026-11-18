@@ -39,8 +39,6 @@ from ..documents.visual_position import suggest_visual_positions
 from ..messages import DEFAULT_LANGUAGE, text
 from .signers import UnlockedSigner, token_settings, words
 
-VERIFY_WINDOW_SECONDS = 300
-
 
 @dataclass(frozen=True)
 class Runtime:
@@ -317,7 +315,6 @@ def _approve(inbox: Inbox, client, signers, runtime: Runtime, owner: str, reques
     entries = [entry for entry in inbox.request_signatures(request_id) if entry.status == "pending" and entry.owner == owner]
     by_id = {signer.config.id: signer for signer in signers if signer.config.owner == owner}
     if record is None or not entries or any(entry.signer_id not in by_id for entry in entries):
-        runtime.say(client, owner, "answer_none")
         return
     if answer == "0":
         for entry in entries:
@@ -356,17 +353,13 @@ def _approve(inbox: Inbox, client, signers, runtime: Runtime, owner: str, reques
 
 def _handle_command(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: Runtime, job: Job) -> None:
     action, _, answer = (job.body or "").partition(" ")
-    if action == "help":
-        runtime.say(client, job.sender, "help")
-    elif action == "ping":
+    if action == "ping":
         runtime.say(client, job.sender, "hello")
-    elif action == "verify":
-        inbox.set_mark(f"verify:{job.sender}")
-        runtime.say(client, job.sender, "verify_prompt")
     elif action == "answer":
         question = inbox.open_question(job.sender, time.time())
+        # With no open question, a stray "1" or "yes" belongs to an ordinary conversation: stay silent.
         if question is None:
-            runtime.say(client, job.sender, "answer_none")
+            pass
         elif question[0] == "choice":
             _choose(inbox, client, signers, runtime, job.sender, question[1], answer)
         else:
@@ -388,9 +381,7 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
             return
         runtime.mention(client, sender, "received")
         document = client.download_document(media_id)
-        mark = inbox.get_mark(f"verify:{sender}")
-        if job.body == "verify" or (mark is not None and time.time() - mark <= VERIFY_WINDOW_SECONDS):
-            inbox.clear_mark(f"verify:{sender}")
+        if job.body == "verify":
             language = runtime.language(sender)
             report = (describe(verify_signatures(document), language) if document.startswith(b"%PDF-")
                       else text(language, "verify_only_pdf"))
@@ -505,7 +496,6 @@ def _choose(inbox: Inbox, client, signers, runtime: Runtime, sender: str, reques
     record = inbox.get_request(request_id)
     entries = [entry for entry in inbox.request_signatures(request_id) if entry.status == "offered"]
     if record is None or not entries:
-        runtime.say(client, sender, "answer_none")
         return
     if answer == "0":
         _discard(inbox, runtime, request_id)

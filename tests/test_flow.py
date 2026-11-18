@@ -229,8 +229,9 @@ def test_requester_agrees_then_the_owner_approves_with_a_single_digit(world):
     assert world.state(message) == "awaiting_confirmation" and not world.chat.files and world.audit.entries() == []
     # Only the owner's own answer counts.
     world.send(PREPARER, text="1")
+    quiet = len(world.chat.to(OWNER_B))
     world.send(OWNER_B, text="1")
-    assert not world.chat.files and "nothing waiting for your answer" in world.chat.to(OWNER_B)[-1]
+    assert not world.chat.files and len(world.chat.to(OWNER_B)) == quiet
     world.send(OWNER_A, text="1")
     assert world.chat.to(OWNER_A)[-1] == "Approved! The document was signed."
     recipient, signed, filename = world.chat.files[0]
@@ -241,7 +242,7 @@ def test_requester_agrees_then_the_owner_approves_with_a_single_digit(world):
     assert not world.runtime.pending_file(entry["request_id"]).exists()
     # The approval was used; answering again finds nothing waiting.
     world.send(OWNER_A, text="1")
-    assert len(world.chat.files) == 1 and "nothing waiting for your answer" in world.chat.to(OWNER_A)[-1]
+    assert len(world.chat.files) == 1 and world.chat.to(OWNER_A)[-1] == "Approved! The document was signed."
 
 
 def test_requester_who_declines_never_involves_the_owner(world):
@@ -323,8 +324,9 @@ def test_requester_chooses_who_signs_when_several_signers_are_found(world):
     assert world.state(message) == "sent" and signer_names(world.chat.files[0][1]) == ["Bruno Example"]
     assert world.chat.files[0][2] == "report.pdf" and world.chat.notes[-1][1] == "All set! Signed by: Bruno Example."
     assert [entry["certificate_id"] for entry in world.audit.entries()] == ["bruno"]
+    quiet = len(world.chat.to(OWNER_A))
     world.send(OWNER_A, text="2")
-    assert "nothing waiting for your answer" in world.chat.to(OWNER_A)[-1] and len(world.chat.files) == 1
+    assert len(world.chat.to(OWNER_A)) == quiet and len(world.chat.files) == 1
 
 
 def test_two_signatures_in_sequence_keep_the_first_valid(world):
@@ -381,7 +383,7 @@ def test_a_signed_document_can_receive_another_signature_later(world):
 def test_choice_can_be_cancelled_expires_and_only_the_requester_may_answer(world):
     first = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
     world.send(OWNER_B, text="1")
-    assert "nothing waiting for your answer" in world.chat.to(OWNER_B)[-1] and world.state(first) == "awaiting_choice"
+    assert world.chat.to(OWNER_B) == [] and world.state(first) == "awaiting_choice"
     world.send(OWNER_A, text="cancelar")
     assert world.state(first) == "needs_review" and world.chat.to(OWNER_A)[-1] == "Cancelled. Nothing was signed."
     second = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
@@ -416,8 +418,7 @@ def test_verify_command_checks_every_signature_without_signing(world):
     world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
     world.send(OWNER_A, text="3")
     signed = world.chat.files[0][1]
-    world.send(PREPARER, text="Verificar")
-    message = world.send(PREPARER, signed)
+    message = world.send(PREPARER, signed, caption="verify")
     report = world.chat.to(PREPARER)[-1]
     assert world.state(message) == "verified" and len(world.chat.files) == 1
     assert "2 signature(s) found" in report and "All signatures are valid." in report
@@ -437,6 +438,22 @@ def test_ping_word_answers_hello_to_show_the_bot_is_alive(world):
     assert not world.chat.files and not world.chat.downloads and world.audit.entries() == []
 
 
+def test_ordinary_conversation_is_never_answered(world):
+    """The number is also a personal one: only documents, the ping and awaited answers get a reply."""
+    for words in ("1", "0", "sim", "Não", "todos", "ok"):
+        message = world.send(OWNER_A, text=words)
+        assert world.state(message) == "done"
+    assert world.chat.to(OWNER_A) == [] and not world.chat.files and world.audit.entries() == []
+    chat = f"{OWNER_A}@s.whatsapp.net"
+    payload = {"event": {"type": "messages", "event": "post"},
+               "messages": [{"id": f"t{index}", "from_me": False, "type": "text", "chat_id": chat, "text": {"body": body}}
+                            for index, body in enumerate(["help", "ajuda", "verificar", "ping", "see you at 5", "BOTM4"])]}
+    assert [job.body for job in accepted_events(payload, frozenset({OWNER_A}))] == ["ping"]
+    payload["messages"] = [{"id": "d1", "from_me": False, "type": "document", "chat_id": chat,
+                            "document": {"id": "media-d", "file_name": "a.pdf", "caption": " Verificar "}}]
+    assert accepted_events(payload, frozenset({OWNER_A}))[0].body == "verify"
+
+
 def test_key_material_sent_in_chat_is_refused_without_download(world):
     payload = {"event": {"type": "messages", "event": "post"},
                "messages": [{"id": "k1", "from_me": False, "type": "document", "chat_id": f"{OWNER_A}@s.whatsapp.net",
@@ -452,12 +469,11 @@ def test_key_material_sent_in_chat_is_refused_without_download(world):
 
 
 def test_only_known_commands_are_kept_from_chat_text():
-    assert parse_command("VERIFICAR") == "verify" and parse_command("ajuda") == "help"
-    assert parse_command("BOTM4") == "ping" and parse_command(" botm4 ") == "ping" and parse_command("ping") == "ping"
+    assert parse_command("BOTM4") == "ping" and parse_command(" botm4 ") == "ping"
     assert parse_command("2") == "answer 2" and parse_command("Todos") == "answer all"
     assert parse_command("Sim") == "answer 1" and parse_command("aprovar") == "answer 1"
     assert parse_command("cancelar") == "answer 0" and parse_command("recusar") == "answer 0" and parse_command("Não") == "answer 0"
-    for text in ["hello", "my cpf is 123.456.789-00", "47", "47 please", "1 2", "1234567", None, "x" * 50]:
+    for text in ["verificar", "ajuda", "help", "ping", "hello", "my cpf is 123.456.789-00", "47", "47 please", "1 2", "1234567", None, "x" * 50]:
         assert parse_command(text) is None
 
 
@@ -518,7 +534,7 @@ def test_each_person_is_answered_in_their_own_language(world):
     world.inbox.add([Job("lang3", "", None, OWNER_C, "text", "answer 1"), Job("lang4", "", None, OWNER_A, "text", "answer 1")])
     assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
     assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
-    assert "nothing waiting for your answer" in world.chat.to(OWNER_C)[-1]
+    assert world.chat.to(OWNER_C) == []
     assert world.chat.to(OWNER_A)[-1] == "Aprovado! O documento foi assinado."
     assert world.chat.notes[-1] == (PREPARER, "Tudo certo! Assinado por: Alice Example.")
 
