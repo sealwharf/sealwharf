@@ -1,4 +1,6 @@
 """Every language says and understands the same things; a new one only needs its own catalog file."""
+import re
+
 import pytest
 
 from sealwharf.adapters.inbox import asks_verification, parse_command
@@ -29,18 +31,20 @@ def test_each_language_is_complete(code):
     catalog = CATALOGS[code]
     check_catalog(catalog, REFERENCE)
     assert set(catalog.phrases) == set(PHRASE_KINDS) and all(catalog.phrases.values())
-    assert len(catalog.replies["wake"]) == len(set(catalog.replies["wake"])) == 20
+    assert len(catalog.replies["wake"]) == len(set(catalog.replies["wake"])) == 25
     # Every message can be written out with its placeholders filled in.
     for key in catalog.messages:
         filled = text(code, key, **dict.fromkeys(
             ("fonts", "signed", "names", "minutes", "options", "all", "name", "owner", "file", "count", "files", "owners", "ahead",
-             "requester", "waiting", "missing", "certificate", "date", "days", "moment"), "x"))
+             "requester", "waiting", "missing", "certificate", "date", "days", "moment", "position", "kind"), "x"))
         assert filled.strip() and "{" not in filled, key
 
 
 @pytest.mark.parametrize("code", [code for code in LANGUAGES if code != DEFAULT_LANGUAGE])
 def test_translations_are_not_left_in_english(code):
-    same = [key for key, value in CATALOGS[code].messages.items() if value == REFERENCE.messages[key] and len(value) > 12]
+    # A message made only of placeholders, such as "{position}. {name} ({kind})", reads the same everywhere.
+    same = [key for key, value in CATALOGS[code].messages.items()
+            if value == REFERENCE.messages[key] and len(re.sub(r"\{\w+\}|\W", "", value)) > 8]
     assert same == []
 
 
@@ -60,7 +64,7 @@ def test_an_incomplete_language_is_refused():
         catalog(phrases={kind: values for kind, values in REFERENCE.phrases.items() if kind != "wake"}),
         catalog(phrases=REFERENCE.phrases | {"yes": frozenset()}),
         catalog(replies={"wake": REFERENCE.replies["wake"][:3]}),
-        catalog(replies={"wake": REFERENCE.replies["wake"][:19] + REFERENCE.replies["wake"][:1]}),
+        catalog(replies={"wake": REFERENCE.replies["wake"][:24] + REFERENCE.replies["wake"][:1]}),
     ]
     for candidate in broken:
         with pytest.raises(RuntimeError, match="xx.toml is incomplete"):
@@ -91,6 +95,13 @@ def test_each_language_has_its_own_wake_phrase_and_all_of_them_work_for_everyone
         assert parse_command(phrase) == "ping", phrase
     # The message must be exactly the phrase: anything near it is ordinary conversation.
     for near in ("wake up", "wake up, bot", "wake up bot!", "wakeup bot", "despierta", "despierta el bot", "acorda o bot", "bot"):
+        assert parse_command(near) is None, near
+
+
+def test_the_status_command_is_written_in_english_by_everyone():
+    for command in ("bot status", "Bot Status", " BOTSTATUS "):
+        assert parse_command(command) == "status", command
+    for near in ("status", "bot status?", "status bot", "bot  status", "bot estado", "status do bot", "the bot status"):
         assert parse_command(near) is None, near
 
 

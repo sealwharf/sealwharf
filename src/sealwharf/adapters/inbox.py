@@ -18,6 +18,8 @@ from .locking import WorkerLock, worker_lock_path
 ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
 SECRET_FILE = re.compile(r"\.(p12|pfx|pem|key|jks|keystore)$", re.IGNORECASE)
 ANSWERS = {"yes": "1", "no": "0", "all": "all"}
+# A command, not a phrase of a language: it is written the same way by everyone, and answered in the reader's language.
+STATUS_COMMANDS = frozenset({"bot status", "botstatus"})
 
 
 class Job(NamedTuple):
@@ -53,7 +55,7 @@ class SigningRequestRecord(NamedTuple):
 
 
 def parse_command(text: object) -> str | None:
-    """Reduce a chat message to the wake phrase or an answer, or None so it is discarded.
+    """Reduce a chat message to the wake phrase, the status command or an answer, or None so it is discarded.
 
     The number may also be used for ordinary conversations, which are never kept.
     """
@@ -63,6 +65,8 @@ def parse_command(text: object) -> str | None:
     # number is also a personal one, so nothing that merely resembles the phrase may get a reply.
     if phrase_kind(text, ("wake",)) is not None:
         return "ping"
+    if normalized(text) in STATUS_COMMANDS:
+        return "status"
     words = re.sub(r"[^a-z0-9 ]", "", normalized(text)).split()
     if len(words) != 1:
         return None
@@ -202,6 +206,11 @@ class Inbox:
             return db.execute("SELECT 1 FROM jobs WHERE sender=? AND kind='document' AND (state IN ('pending', 'processing') "
                               "OR (? > 0 AND created_at > datetime('now', ?))) LIMIT 1",
                               (sender, settle_seconds, f"-{int(settle_seconds)} seconds")).fetchone() is not None
+
+    def documents_waiting(self) -> int:
+        """Count the documents that wait for somebody's answer."""
+        with self.connect() as db:
+            return db.execute("SELECT COUNT(*) FROM jobs WHERE state IN ('awaiting_choice', 'awaiting_confirmation')").fetchone()[0]
 
     def mark_document(self, message_id: str, sender: str, digest: str) -> bool:
         """Record what a document is; return True when the same number already has that same file in hand.

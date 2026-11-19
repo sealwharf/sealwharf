@@ -93,6 +93,22 @@ def unlock_signers(signers: tuple[SignerConfig, ...], *, data_dir: Path | None =
     return tuple(unlocked)
 
 
+def status_report(inbox: Inbox, signers: tuple[UnlockedSigner, ...], language: str, *, now: datetime | None = None) -> str:
+    """What the status command answers: each installed certificate with its expiry date, and the documents in hand."""
+    moment = now or datetime.now(UTC)
+    lines = [text(language, "status_header", count=len(signers))]
+    for position, signer in enumerate(signers, 1):
+        expires = signer.expires_at
+        days = (expires - moment).days if expires is not None else 0
+        key = ("status_no_date" if expires is None else "status_expired" if expires <= moment
+               else "status_expiring" if days <= EXPIRY_WARNING_DAYS else "status_certificate")
+        lines.append(text(language, key, position=position, name=signer.config.name, days=days,
+                          kind=text(language, "status_token" if signer.config.token_module is not None else "status_file"),
+                          date=expires.date().isoformat() if expires is not None else ""))
+    lines.append(text(language, "status_waiting", count=inbox.documents_waiting()))
+    return "\n".join(lines)
+
+
 def warn_expiring(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], languages: dict[str, str] | None = None,
                   *, now: datetime | None = None) -> None:
     """Tell each owner, once a day, that a certificate expires within thirty days."""

@@ -100,7 +100,8 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 | A PDF or Word document | Signs it and sends it back. |
 | `1`, `2`, `0`… or a word such as `yes`, `no`, `all` | Takes it as your answer to the question it just asked. |
 | A PDF with the caption `verify` (or `verificar`) | Checks the signatures of that PDF, without signing. |
-| `wake up bot` | Answers with one of twenty playful lines, to show it is working. Capitals do not matter and `wakeupbot` works too, but the message must be exactly that. |
+| `wake up bot` | Answers with one of twenty-five playful lines, in whatever mood it happens to be, to show it is working. Capitals do not matter and `wakeupbot` works too, but the message must be exactly that. |
+| `bot status` | Lists the certificates that are installed, with the date each one expires and the days left, and tells how many documents wait for an answer. |
 
 **Languages.** The bot speaks English (`en`), Brazilian Portuguese (`pt-br`) and Spanish (`es`). Each person reads the language set for them in `contacts`, and everyone may write in any of the three:
 
@@ -111,6 +112,17 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 | Answer no | `no`, `reject`, `cancel` | `não`, `recusar`, `cancelar` | `no`, `rechazar`, `cancelar` |
 | Answer all | `all` | `todos` | `todos` |
 | Caption to check signatures | `verify` | `verificar` | `comprobar` |
+
+`bot status` is written the same way in every language (`botstatus` works too), and the answer comes in the language of whoever asked:
+
+```text
+Up and running. Certificates installed: 2.
+1. John Doe (file): valid until 2027-08-14, 268 day(s) left
+2. Jane Doe (USB token): expires on 2026-12-10, only 21 day(s) left. Time to renew it!
+Documents waiting for an answer: 0.
+```
+
+Anyone in `contacts` may ask for it.
 
 **When more than one person can sign.** If the document has the names of several signers you may use, the bot asks who should sign and you reply with a number: one of them, all of them, or cancel.
 
@@ -309,7 +321,7 @@ To get exactly the same result as on your computer, do one of these:
 
 ## Good to know
 
-- **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact message `wake up bot` (or its Portuguese or Spanish form) sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
+- **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact messages `wake up bot` (or its Portuguese or Spanish form) and `bot status` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
 - **Privacy.** Documents and certificates are processed on your computer. Whapi and Cloudflare only carry the messages. Certificates and passwords are never accepted through the chat: a `.p12` file sent to the bot is refused without being opened.
 - **Record of signatures.** Every signature is recorded with the time, who asked, who approved and the fingerprint of the document. Read the record with `docker compose exec sealwharf cat /data/audit.jsonl`.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.

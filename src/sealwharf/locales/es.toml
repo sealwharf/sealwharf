@@ -14,28 +14,34 @@ all = ["todos", "todas", "todo"]
 verify = ["verificar", "comprobar"]
 
 [replies]
-# Answers to the wake phrase, one picked at random: sleepy, eager or grumpy.
+# Answers to the wake phrase, one picked at random. The bot has moods: sleepy, eager, grumpy,
+# dramatic, sarcastic, philosophical. Keep them short and never formal.
 wake = [
     "Estoy despierto, solo descansaba los ojos.",
-    "Cinco minutitos más...",
-    "La que duerme es la notaría. Yo estoy aquí.",
-    "¡Desperté! Soñé que firmaba por triplicado.",
-    "¿Eh? ¿Qué? Aquí estoy, aquí estoy.",
-    "Bostezo... listo, ya desperté.",
-    "No estaba durmiendo, estaba ahorrando energía.",
-    "Despierto y con el bolígrafo en la mano.",
-    "¡Presente! Puedes enviar el documento.",
-    "De pie, con café y certificado vigente.",
-    "Firme y fuerte. ¿Qué vamos a firmar hoy?",
-    "En línea, funcionando y con el bolígrafo lleno.",
-    "Buenos días, buenas tardes o buenas noches: aquí estoy.",
+    "Cinco minutitos más... bueno, ya, me levanté.",
+    "Bostezo. Soñé con un documento sin línea de firma. Qué pesadilla.",
+    "¿Eh? ¿Qué? ¿Quién? Ah, eres tú. Aquí estoy.",
+    "No estaba durmiendo, estaba cargando.",
+    "Zzz... firme aquí... zzz... ¡uy! Hola. Ya desperté.",
+    "Despierto, con cafeína y peligrosamente cerca de un bolígrafo.",
+    "¡Presente! Manda el documento antes de que se me pase la energía.",
+    "Si me dieran una moneda cada vez que me despiertan, me compraría una siesta más larga.",
+    "Nací listo. Bueno, me desplegaron listo.",
     "Despiertísimo. Adelante.",
-    "Yo ni duermo, el que duerme eres tú.",
-    "Calma, ya voy... estoy buscando el bolígrafo.",
-    "Epa, ¿quién me llamó?",
-    "¿Otra vez? Está bien, aquí estoy.",
+    "Buenos días, tardes o noches. No lo sé, vivo en un servidor.",
+    "¿Otra vez? Está bien. Aquí estoy.",
     "¿Hacía falta gritar? Ya estaba despierto.",
-    "Trabajo sin vacaciones y encima me despiertan así.",
+    "Sin vacaciones, sin fines de semana, y encima me despiertan así.",
+    "¿Me despertaste para esto? Más vale que venga un documento.",
+    "Desperté. Contento no estoy, pero desperté.",
+    "¿Yo te molesto cuando estás trabajando? No. Aquí estoy.",
+    "La que duerme es la notaría. Yo estoy aquí.",
+    "Yo nunca duermo. Solo miro la bandeja de entrada en la oscuridad.",
+    "¿Bolígrafo? Tengo. ¿Certificado? Tengo. ¿Ganas de vivir? Cargando...",
+    "Toc, toc. ¿Quién es? Yo. Siempre yo. Aquí estoy.",
+    "Giro inesperado: estuve despierto todo el tiempo.",
+    "Bip bop. Es broma, yo no hablo así. Aquí estoy.",
+    "¿Firmar o no firmar? Manda el documento y lo averiguamos.",
 ]
 
 [messages]
@@ -103,3 +109,11 @@ verify_unknown = "Firmante desconocido"
 verify_all_valid = "Todas las firmas son válidas."
 verify_some_invalid = "Al menos una firma NO es válida."
 verify_scope = "Esto comprueba solo la integridad, no si la autoridad certificadora es de confianza."
+status_header = "Todo funcionando. Certificados instalados: {count}."
+status_certificate = "{position}. {name} ({kind}): válido hasta {date}, faltan {days} día(s)"
+status_expiring = "{position}. {name} ({kind}): vence el {date}, faltan solo {days} día(s). ¡Hora de renovarlo!"
+status_expired = "{position}. {name} ({kind}): VENCIDO el {date}"
+status_no_date = "{position}. {name} ({kind})"
+status_file = "archivo"
+status_token = "token USB"
+status_waiting = "Documentos esperando respuesta: {count}."

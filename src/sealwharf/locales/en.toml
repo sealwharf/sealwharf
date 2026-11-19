@@ -15,28 +15,34 @@ all = ["all"]
 verify = ["verify", "check"]
 
 [replies]
-# Answers to the wake phrase, one picked at random: sleepy, eager or grumpy.
+# Answers to the wake phrase, one picked at random. The bot has moods: sleepy, eager, grumpy,
+# dramatic, sarcastic, philosophical. Keep them short and never formal.
 wake = [
     "I'm awake, just resting my eyes.",
-    "Five more minutes...",
-    "The notary's office sleeps. I don't.",
-    "I'm up! I dreamed I was signing in triplicate.",
-    "Huh? What? I'm here, I'm here.",
-    "Yawn... okay, I'm awake.",
-    "I wasn't sleeping, I was saving energy.",
-    "Awake and pen in hand.",
-    "Present! Send the document over.",
-    "Up, with coffee and a valid certificate.",
-    "Going strong. What are we signing today?",
-    "Online, running and with a full pen.",
-    "Good morning, afternoon or evening: I'm here.",
+    "Five more minutes... okay, fine, I'm up.",
+    "Yawn. I was dreaming of a document with no signature line. A nightmare.",
+    "Huh? What? Who? Oh, it's you. I'm here.",
+    "I wasn't sleeping, I was buffering.",
+    "Zzz... sign here... zzz... oh! Hi. I'm awake.",
+    "Awake, caffeinated and dangerously close to a pen.",
+    "Present! Send the document before this energy wears off.",
+    "If I had a coin for every time someone woke me up, I'd buy a longer nap.",
+    "I was born ready. Well, deployed ready.",
     "Wide awake. Bring it on.",
-    "I never sleep. You're the one who does.",
-    "Hold on, coming... just looking for my pen.",
-    "Hey, who called me?",
-    "Again? Fine, I'm here.",
+    "Good morning, afternoon or evening. I can't tell, I live in a server.",
+    "Again? Fine. I'm here.",
     "No need to shout, I was already awake.",
-    "No vacation, and this is how I get woken up.",
+    "No vacation, no weekends, and this is how I get woken up.",
+    "You woke me up for this? There had better be a document coming.",
+    "I'm awake. Not happy, but awake.",
+    "Do I poke you while you're working? No. I'm here.",
+    "The notary's office sleeps. I don't.",
+    "I never sleep. I just stare at the inbox in the dark.",
+    "Pen? Got it. Certificate? Got it. Will to live? Loading...",
+    "Knock, knock. Who's there? Me. Always me. I'm here.",
+    "Plot twist: I was awake the whole time.",
+    "Beep boop. Just kidding, I don't talk like that. I'm here.",
+    "To sign or not to sign? Send the document and we'll find out.",
 ]
 
 [messages]
@@ -104,3 +110,11 @@ verify_unknown = "Unknown signer"
 verify_all_valid = "All signatures are valid."
 verify_some_invalid = "At least one signature is NOT valid."
 verify_scope = "This checks integrity only, not whether a certificate authority is trusted."
+status_header = "Up and running. Certificates installed: {count}."
+status_certificate = "{position}. {name} ({kind}): valid until {date}, {days} day(s) left"
+status_expiring = "{position}. {name} ({kind}): expires on {date}, only {days} day(s) left. Time to renew it!"
+status_expired = "{position}. {name} ({kind}): EXPIRED on {date}"
+status_no_date = "{position}. {name} ({kind})"
+status_file = "file"
+status_token = "USB token"
+status_waiting = "Documents waiting for an answer: {count}."

@@ -3,8 +3,10 @@
 import hashlib
 import logging
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
+from pathlib import Path
 
 import httpx
 import pytest
@@ -20,7 +22,7 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sealwharf.adapters.audit import AuditLog
 from sealwharf.adapters.inbox import Inbox, Job, accepted_events, parse_command
 from sealwharf.adapters.whapi import Whapi, signed_filename
-from sealwharf.application.signers import unlock_signers, warn_expiring
+from sealwharf.application.signers import status_report, unlock_signers, warn_expiring
 from sealwharf.application.worker import Runtime, ask_questions, expire_requests, process_one, tell_outcomes
 from sealwharf.authorization import canonical_number, format_number
 from sealwharf.documents.verification import describe, verify_signatures
@@ -616,6 +618,32 @@ def test_wake_phrase_gets_one_of_the_replies_to_show_the_bot_is_alive(world):
     assert not world.chat.files and not world.chat.downloads and world.audit.entries() == []
 
 
+def test_bot_status_lists_the_certificates_with_their_expiry_dates(world):
+    message = world.send(PREPARER, text="Bot Status")
+    report = world.chat.to(PREPARER)[0].splitlines()
+    expiry = world.signers[0].expires_at.date().isoformat()
+    assert world.state(message) == "done" and len(world.chat.to(PREPARER)) == 1
+    assert report[0] == "Up and running. Certificates installed: 3."
+    assert report[1] == f"1. Alice Example (file): valid until {expiry}, 364 day(s) left"
+    assert all(name in line for name, line in zip(NAMES.values(), report[1:4], strict=True))
+    assert report[4] == "Documents waiting for an answer: 0." and len(report) == 5
+    # A document that waits for an answer is counted, and nothing about the status is recorded.
+    world.send(PREPARER, make_pdf("Alice Example"))
+    now = datetime.now(UTC)
+    soon, late = now + timedelta(days=340), now + timedelta(days=400)
+    assert status_report(world.inbox, world.signers, "en", now=now).endswith("Documents waiting for an answer: 1.")
+    assert f"1. Alice Example (file): expires on {expiry}, only 24 day(s) left. Time to renew it!" in status_report(
+        world.inbox, world.signers, "en", now=soon)
+    assert f"1. Alice Example (file): EXPIRED on {expiry}" in status_report(world.inbox, world.signers, "en", now=late)
+    portuguese = status_report(world.inbox, world.signers, "pt-br", now=now).splitlines()
+    assert portuguese[0] == "Tudo funcionando. Certificados instalados: 3."
+    assert portuguese[1] == f"1. Alice Example (arquivo): válido até {expiry}, faltam 364 dia(s)"
+    assert status_report(world.inbox, world.signers, "es", now=now).splitlines()[-1] == "Documentos esperando respuesta: 1."
+    token = (replace(world.signers[0], config=replace(world.signers[0].config, token_module=Path("module.so"), token_label="t")),)
+    assert "1. Alice Example (USB token): valid until" in status_report(world.inbox, token, "en", now=now)
+    assert world.audit.entries() == []
+
+
 def test_ordinary_conversation_is_never_answered(world):
     """The number is also a personal one: only documents, the ping and awaited answers get a reply."""
     for words in ("1", "0", "sim", "Não", "todos", "ok"):
@@ -626,7 +654,7 @@ def test_ordinary_conversation_is_never_answered(world):
     payload = {"event": {"type": "messages", "event": "post"},
                "messages": [{"id": f"t{index}", "from_me": False, "type": "text", "chat_id": chat, "text": {"body": body}}
                             for index, body in enumerate(["help", "ajuda", "verificar", "ping", "see you at 5", "BOTM4", "acordsa bot", "acorda o bot",
-                                                       "acorda bot!", "bom dia, acorda bot", "ACORDA BOT"])]}
+                                                       "acorda bot!", "bom dia, acorda bot", "status", "bot status please", "ACORDA BOT"])]}
     assert [job.body for job in accepted_events(payload, frozenset({OWNER_A}))] == ["ping"]
     payload["messages"] = [{"id": "d1", "from_me": False, "type": "document", "chat_id": chat,
                             "document": {"id": "media-d", "file_name": "a.pdf", "caption": " Verificar "}}]

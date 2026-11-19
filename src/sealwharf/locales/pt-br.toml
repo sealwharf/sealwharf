@@ -14,28 +14,34 @@ all = ["todos", "todas", "tudo"]
 verify = ["verificar"]
 
 [replies]
-# Answers to the wake phrase, one picked at random: sleepy, eager or grumpy.
+# Answers to the wake phrase, one picked at random. The bot has moods: sleepy, eager, grumpy,
+# dramatic, sarcastic, philosophical. Keep them short and never formal.
 wake = [
     "Tô acordado, só de olho fechado.",
-    "Só mais cinco minutinhos...",
-    "Quem dorme é o cartório. Eu tô aqui.",
-    "Acordei! Sonhei que assinava em três vias.",
-    "Hã? Quê? Tô aqui, tô aqui.",
-    "Bocejo... pronto, acordei.",
-    "Eu não estava dormindo, estava economizando energia.",
-    "Acordado e de caneta na mão.",
-    "Presente! Pode mandar o documento.",
-    "De pé, com café e certificado válido.",
-    "Firme e forte. O que vamos assinar hoje?",
-    "Online, operante e com a caneta cheia.",
-    "Bom dia, boa tarde ou boa noite: tô aqui.",
+    "Só mais cinco minutinhos... tá, tá, levantei.",
+    "Bocejo. Sonhei com um documento sem linha de assinatura. Que pesadelo.",
+    "Hã? Quê? Quem? Ah, é você. Tô aqui.",
+    "Eu não estava dormindo, estava carregando.",
+    "Zzz... assine aqui... zzz... opa! Oi. Acordei.",
+    "Acordado, cafeinado e perigosamente perto de uma caneta.",
+    "Presente! Manda o documento antes que essa disposição passe.",
+    "Se eu ganhasse uma moeda cada vez que me acordam, comprava um cochilo maior.",
+    "Já nasci pronto. Quer dizer, já subi pronto.",
     "Acordadíssimo. Manda ver.",
-    "Eu nem durmo, quem dorme é você.",
-    "Calma, já vai... tô procurando a caneta.",
-    "Opa, quem foi que me chamou?",
-    "De novo? Tá bom, tô aqui.",
+    "Bom dia, boa tarde ou boa noite. Não sei, eu moro num servidor.",
+    "De novo? Tá bom. Tô aqui.",
     "Precisava gritar? Eu já estava acordado.",
-    "Trabalho sem férias e ainda me acordam assim.",
+    "Sem férias, sem fim de semana, e ainda me acordam assim.",
+    "Me acordou pra isso? Espero que venha um documento aí.",
+    "Acordei. Feliz não tô, mas acordei.",
+    "Eu te cutuco quando você tá trabalhando? Não. Tô aqui.",
+    "Quem dorme é o cartório. Eu tô aqui.",
+    "Eu nunca durmo. Só fico encarando a caixa de entrada no escuro.",
+    "Caneta? Tenho. Certificado? Tenho. Vontade de viver? Carregando...",
+    "Toc, toc. Quem é? Eu. Sempre eu. Tô aqui.",
+    "Reviravolta: eu estava acordado o tempo todo.",
+    "Bip bop. Brincadeira, eu não falo assim. Tô aqui.",
+    "Assinar ou não assinar? Manda o documento que a gente descobre.",
 ]
 
 [messages]
@@ -103,3 +109,11 @@ verify_unknown = "Signatário desconhecido"
 verify_all_valid = "Todas as assinaturas são válidas."
 verify_some_invalid = "Pelo menos uma assinatura NÃO é válida."
 verify_scope = "Isto confere apenas a integridade, não se a autoridade certificadora é confiável."
+status_header = "Tudo funcionando. Certificados instalados: {count}."
+status_certificate = "{position}. {name} ({kind}): válido até {date}, faltam {days} dia(s)"
+status_expiring = "{position}. {name} ({kind}): vence em {date}, faltam só {days} dia(s). Hora de renovar!"
+status_expired = "{position}. {name} ({kind}): VENCIDO em {date}"
+status_no_date = "{position}. {name} ({kind})"
+status_file = "arquivo"
+status_token = "token USB"
+status_waiting = "Documentos aguardando resposta: {count}."

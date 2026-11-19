@@ -42,7 +42,7 @@ from ..documents.validation import validate_pdf
 from ..documents.verification import describe, verify_signatures
 from ..documents.visual_position import suggest_visual_positions
 from ..messages import DEFAULT_LANGUAGE, text, wake_reply
-from .signers import UnlockedSigner, token_settings, words
+from .signers import UnlockedSigner, status_report, token_settings, words
 
 SETTLE_SECONDS = 5
 
@@ -486,6 +486,8 @@ def _handle_command(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
     action, _, answer = (job.body or "").partition(" ")
     if action == "ping":
         client.send_text(job.sender, wake_reply(runtime.language(job.sender)))
+    elif action == "status":
+        client.send_text(job.sender, status_report(inbox, signers, runtime.language(job.sender)))
     elif action == "answer":
         question = inbox.open_question(job.sender, time.time())
         # With no open question, a stray "1" or "yes" belongs to an ordinary conversation: stay silent.

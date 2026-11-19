@@ -76,6 +76,7 @@ docker build -t sealwharf:local .
   catalog that is incomplete stops the program at start. A phrase people write
   (wake phrase, answer word, verify caption) goes in the catalogs too, never
   in the code, and an answer word may not mean different answers in two
-  languages.
+  languages. The one exception is the `bot status` command, written the same
+  way by everyone and kept in `adapters/inbox.py`; only its answer is translated.
 - A token PIN is tried once. After a refusal the guard file in the data folder
   blocks every further login until `token-retry` is run; never loop on a PIN.
