@@ -25,7 +25,7 @@ from sealwharf.application.signers import unlock_signers, warn_expiring
 from sealwharf.application.worker import Runtime, ask_questions, expire_requests, process_one, tell_outcomes
 from sealwharf.authorization import canonical_number, format_number
 from sealwharf.documents.verification import describe, verify_signatures
-from sealwharf.messages import LANGUAGES, MESSAGES
+from sealwharf.messages import LANGUAGES, MESSAGES, WAKE_REPLIES, wake_reply
 from sealwharf.signer_config import SignerConfig, load_config
 
 OWNER_A, OWNER_B, OWNER_C = "5511900000001", "5511900000002", "5511900000003"
@@ -605,9 +605,16 @@ def test_verify_command_checks_every_signature_without_signing(world):
     assert describe([]) == "This PDF has no digital signatures." and describe([], "pt-br") == "Este PDF não tem assinaturas digitais."
 
 
-def test_ping_word_answers_hello_to_show_the_bot_is_alive(world):
-    message = world.send(OWNER_A, text="BOTM4")
-    assert world.chat.to(OWNER_A) == ["Hello"] and world.state(message) == "done"
+def test_wake_phrase_gets_one_of_the_replies_to_show_the_bot_is_alive(world):
+    message = world.send(OWNER_A, text="Acorda Bot")
+    assert len(world.chat.to(OWNER_A)) == 1 and world.chat.to(OWNER_A)[0] in WAKE_REPLIES["en"] and world.state(message) == "done"
+    portuguese = Runtime(world.runtime.data_dir, languages={OWNER_B: "pt-br"})
+    world.inbox.add([Job("wake", "", None, OWNER_B, "text", parse_command("acordabot"))])
+    assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
+    assert world.chat.to(OWNER_B)[0] in WAKE_REPLIES["pt-br"]
+    # Twenty different replies in each language, one picked at random.
+    assert all(len(replies) == len(set(replies)) == 20 for replies in WAKE_REPLIES.values()) and set(WAKE_REPLIES) == set(LANGUAGES)
+    assert len({wake_reply("pt-br") for _ in range(200)}) > 5
     assert not world.chat.files and not world.chat.downloads and world.audit.entries() == []
 
 
@@ -620,7 +627,8 @@ def test_ordinary_conversation_is_never_answered(world):
     chat = f"{OWNER_A}@s.whatsapp.net"
     payload = {"event": {"type": "messages", "event": "post"},
                "messages": [{"id": f"t{index}", "from_me": False, "type": "text", "chat_id": chat, "text": {"body": body}}
-                            for index, body in enumerate(["help", "ajuda", "verificar", "ping", "see you at 5", "BOTM4"])]}
+                            for index, body in enumerate(["help", "ajuda", "verificar", "ping", "see you at 5", "BOTM4", "acordsa bot", "acorda o bot",
+                                                       "acorda bot!", "bom dia, acorda bot", "ACORDA BOT"])]}
     assert [job.body for job in accepted_events(payload, frozenset({OWNER_A}))] == ["ping"]
     payload["messages"] = [{"id": "d1", "from_me": False, "type": "document", "chat_id": chat,
                             "document": {"id": "media-d", "file_name": "a.pdf", "caption": " Verificar "}}]
@@ -642,7 +650,10 @@ def test_key_material_sent_in_chat_is_refused_without_download(world):
 
 
 def test_only_known_commands_are_kept_from_chat_text():
-    assert parse_command("BOTM4") == "ping" and parse_command(" botm4 ") == "ping"
+    assert parse_command("ACORDA BOT") == "ping" and parse_command(" acorda bot ") == "ping" and parse_command("AcordaBot") == "ping"
+    # The number is also a personal one, so anything short of the exact phrase is ordinary conversation.
+    for near in ["botm4", "acordsa bot", "acorda  bot", "acorda bot!", "acorda, bot", "acorda o bot", "acorda", "bot", "acorda bot 1"]:
+        assert parse_command(near) is None
     assert parse_command("2") == "answer 2" and parse_command("Todos") == "answer all"
     assert parse_command("Sim") == "answer 1" and parse_command("aprovar") == "answer 1"
     assert parse_command("cancelar") == "answer 0" and parse_command("recusar") == "answer 0" and parse_command("Não") == "answer 0"
@@ -727,7 +738,7 @@ def test_brazilian_numbers_match_with_or_without_the_ninth_digit(world):
     written, whatsapp = "5553981234567", "555381234567"
     payload = {"event": {"type": "messages", "event": "post"},
                "messages": [{"id": "n1", "from_me": False, "type": "text", "chat_id": f"{whatsapp}@s.whatsapp.net",
-                             "from": whatsapp, "text": {"body": "BotM4"}}]}
+                             "from": whatsapp, "text": {"body": "Acorda Bot"}}]}
     events = accepted_events(payload, frozenset({written}))
     assert events == [Job("n1", "", None, written, "text", "ping", whatsapp)]
     world.inbox.add(events)

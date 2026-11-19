@@ -4,11 +4,12 @@ The tone is that of a helpful person: short, friendly, and free of technical
 detail the reader cannot act on.
 """
 
+import random
+
 LANGUAGES = ("en", "pt-br")
 DEFAULT_LANGUAGE = "en"
 
 MESSAGES = {
-    "hello": {"en": "Hello", "pt-br": "Olá"},
     "received": {
         "en": "Got it! Working on it...",
         "pt-br": "Recebido! Estou processando...",
@@ -191,6 +192,60 @@ MESSAGES = {
         "pt-br": "Isto confere apenas a integridade, não se a autoridade certificadora é confiável.",
     },
 }
+
+
+# What the bot answers to "acorda bot", one picked at random: sleepy, eager or grumpy, to show it is alive.
+WAKE_REPLIES = {
+    "en": (
+        "I'm awake, just resting my eyes.",
+        "Five more minutes...",
+        "The notary's office sleeps. I don't.",
+        "I'm up! I dreamed I was signing in triplicate.",
+        "Huh? What? I'm here, I'm here.",
+        "Yawn... okay, I'm awake.",
+        "I wasn't sleeping, I was saving energy.",
+        "Awake and pen in hand.",
+        "Present! Send the document over.",
+        "Up, with coffee and a valid certificate.",
+        "Going strong. What are we signing today?",
+        "Online, running and with a full pen.",
+        "Good morning, afternoon or evening: I'm here.",
+        "Wide awake. Bring it on.",
+        "I never sleep. You're the one who does.",
+        "Hold on, coming... just looking for my pen.",
+        "Hey, who called me?",
+        "Again? Fine, I'm here.",
+        "No need to shout, I was already awake.",
+        "No vacation, and this is how I get woken up.",
+    ),
+    "pt-br": (
+        "Tô acordado, só de olho fechado.",
+        "Só mais cinco minutinhos...",
+        "Quem dorme é o cartório. Eu tô aqui.",
+        "Acordei! Sonhei que assinava em três vias.",
+        "Hã? Quê? Tô aqui, tô aqui.",
+        "Bocejo... pronto, acordei.",
+        "Eu não estava dormindo, estava economizando energia.",
+        "Acordado e de caneta na mão.",
+        "Presente! Pode mandar o documento.",
+        "De pé, com café e certificado válido.",
+        "Firme e forte. O que vamos assinar hoje?",
+        "Online, operante e com a caneta cheia.",
+        "Bom dia, boa tarde ou boa noite: tô aqui.",
+        "Acordadíssimo. Manda ver.",
+        "Eu nem durmo, quem dorme é você.",
+        "Calma, já vai... tô procurando a caneta.",
+        "Opa, quem foi que me chamou?",
+        "De novo? Tá bom, tô aqui.",
+        "Precisava gritar? Eu já estava acordado.",
+        "Trabalho sem férias e ainda me acordam assim.",
+    ),
+}
+
+
+def wake_reply(language: str) -> str:
+    """Return one of the answers to the wake phrase, in the requested language."""
+    return random.choice(WAKE_REPLIES.get(language, WAKE_REPLIES[DEFAULT_LANGUAGE]))
 
 
 def text(language: str, key: str, **values: object) -> str:

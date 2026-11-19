@@ -80,7 +80,7 @@ Go back to the Cloudflare page: the tunnel now appears as connected. Continue, c
 - **Subdomain and domain:** the address you wrote in `public_url`, for example `bot` + `example.com`.
 - **Service URL:** `http://localhost:8000`
 
-A minute later the bot is ready. To confirm, send it the word `BOTM4` from your WhatsApp: it answers `Hello`.
+A minute later the bot is ready. To confirm, send it the words `acorda bot` from your WhatsApp: it answers with a short, playful line, such as "I'm awake, just resting my eyes."
 
 ## Using it
 
@@ -100,7 +100,7 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 | A PDF or Word document | Signs it and sends it back. |
 | `1`, `2`, `0`… or `sim`, `não`, `todos` | Takes it as your answer to the question it just asked. |
 | A PDF with the caption `verify` (or `verificar`) | Checks the signatures of that PDF, without signing. |
-| `BOTM4` | Answers `Hello`, to show it is working. |
+| `acorda bot` | Answers with one of twenty playful lines, to show it is working. Capitals do not matter and `acordabot` works too, but the message must be exactly that. |
 
 **When more than one person can sign.** If the document has the names of several signers you may use, the bot asks who should sign and you reply with a number: one of them, all of them, or cancel.
 
@@ -273,7 +273,7 @@ docker compose run --rm sealwharf check
 
 | What you see | What to do |
 | --- | --- |
-| The bot does not answer `BOTM4` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the Whapi channel is connected. |
+| The bot does not answer `acorda bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the Whapi channel is connected. |
 | `docker compose ps` shows the bot restarting | Run `docker compose logs sealwharf` and the check above. The usual causes are a mistake in the configuration or the Cloudflare route from step 5 not created yet. |
 | "I could not find a clear place to sign" | The document needs the signer's full name, as in the certificate, next to one empty signature line. The name must appear only once as a signature label. |
 | "Could not open certificate" | The password is wrong, or the certificate file is not in `config/certificates/`. |
@@ -299,7 +299,7 @@ To get exactly the same result as on your computer, do one of these:
 
 ## Good to know
 
-- **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the word `BOTM4` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
+- **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact message `acorda bot` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
 - **Privacy.** Documents and certificates are processed on your computer. Whapi and Cloudflare only carry the messages. Certificates and passwords are never accepted through the chat: a `.p12` file sent to the bot is refused without being opened.
 - **Record of signatures.** Every signature is recorded with the time, who asked, who approved and the fingerprint of the document. Read the record with `docker compose exec sealwharf cat /data/audit.jsonl`.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.

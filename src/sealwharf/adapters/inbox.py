@@ -20,7 +20,9 @@ VERIFY_WORDS = frozenset({"verify", "verificar", "check"})
 YES_WORDS = frozenset({"yes", "sim", "approve", "aprovar", "aprovo", "ok"})
 NO_WORDS = frozenset({"no", "nao", "reject", "recusar", "reprovar", "cancel", "cancelar"})
 ALL_WORDS = frozenset({"all", "todos", "todas", "tudo"})
-PING_WORDS = frozenset({"botm4"})
+# The whole message must be exactly this, in any letter case: the number is also a personal one,
+# so nothing that merely resembles the phrase may get a reply.
+WAKE_PHRASES = frozenset({"acorda bot", "acordabot"})
 
 
 class Job(NamedTuple):
@@ -56,19 +58,19 @@ class SigningRequestRecord(NamedTuple):
 
 
 def parse_command(text: object) -> str | None:
-    """Reduce a chat message to the ping or an answer, or None so it is discarded.
+    """Reduce a chat message to the wake phrase or an answer, or None so it is discarded.
 
     The number may also be used for ordinary conversations, which are never kept.
     """
     if not isinstance(text, str) or len(text) > 40:
         return None
+    if text.strip().casefold() in WAKE_PHRASES:
+        return "ping"
     words = re.sub(r"[^a-z0-9 ]", "", text.strip().casefold().replace("ã", "a")).split()
     if len(words) == 1 and (re.fullmatch(r"[0-9]", words[0]) or words[0] in YES_WORDS | NO_WORDS | ALL_WORDS):
         # One digit, or a plain word, answers the question the bot last asked this number.
         word = words[0]
         return "answer " + ("1" if word in YES_WORDS else "0" if word in NO_WORDS else "all" if word in ALL_WORDS else word)
-    if len(words) == 1 and words[0] in PING_WORDS:
-        return "ping"
     return None
 
 
@@ -78,7 +80,7 @@ def asks_verification(caption: object) -> bool:
 
 
 def accepted_events(payload: object, senders: frozenset[str]) -> list[Job]:
-    """Keep documents, the ping and answers sent directly by configured numbers; drop everything else."""
+    """Keep documents, the wake phrase and answers sent directly by configured numbers; drop everything else."""
     if not isinstance(payload, dict):
         return []
     event = payload.get("event")

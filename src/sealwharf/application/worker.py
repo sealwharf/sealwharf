@@ -41,7 +41,7 @@ from ..documents.signing import (
 from ..documents.validation import validate_pdf
 from ..documents.verification import describe, verify_signatures
 from ..documents.visual_position import suggest_visual_positions
-from ..messages import DEFAULT_LANGUAGE, text
+from ..messages import DEFAULT_LANGUAGE, text, wake_reply
 from .signers import UnlockedSigner, token_settings, words
 
 SETTLE_SECONDS = 5
@@ -485,7 +485,7 @@ def _approve_one(inbox: Inbox, client, signers, runtime: Runtime, owner: str, re
 def _handle_command(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: Runtime, job: Job) -> None:
     action, _, answer = (job.body or "").partition(" ")
     if action == "ping":
-        runtime.say(client, job.sender, "hello")
+        client.send_text(job.sender, wake_reply(runtime.language(job.sender)))
     elif action == "answer":
         question = inbox.open_question(job.sender, time.time())
         # With no open question, a stray "1" or "yes" belongs to an ordinary conversation: stay silent.
