@@ -116,7 +116,7 @@ def test_signs_twice_and_validates_every_signature_in_final_document(document, c
     assert not sent and len(questions) == 1 and "3 - All of them" in questions[0][1]
     inbox.add([("choice", "", None, sender, "text", "answer all")])
     assert process_one(inbox, client, signers)
-    assert len(sent) == 1 and sent[0][0] == sender and len(questions) == 1
+    assert len(sent) == 1 and sent[0][0] == sender and len(questions) == 2 and "Signed by" in questions[1][1]
     signatures = PdfFileReader(BytesIO(sent[0][1])).embedded_signatures
     assert len(signatures) == 2
     for signature in signatures:
@@ -289,4 +289,4 @@ def test_worker_signs_visual_line_with_real_crypto(certificate, tmp_path):
     inbox.add([("message-2", "media-2", "report.pdf", "5511999999999")])
     assert process_one(inbox, other, (unlocked(SignerConfig("test", "Another Person", certificate, allowed_senders=frozenset({"5511999999999"})), b"test-password"),))
     assert other.sent is None
-    assert len(other.notices) == 1
+    assert "clear place to sign" in other.notices[-1]

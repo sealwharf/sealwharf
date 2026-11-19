@@ -10,8 +10,8 @@ DEFAULT_LANGUAGE = "en"
 MESSAGES = {
     "hello": {"en": "Hello", "pt-br": "Olá"},
     "received": {
-        "en": "Got it! Working on your document...",
-        "pt-br": "Recebido! Estou processando o seu documento...",
+        "en": "Got it! Working on it...",
+        "pt-br": "Recebido! Estou processando...",
     },
     "fonts_replaced": {
         "en": "Your Word document was converted to PDF. I replaced the fonts I do not have: {fonts}. "
@@ -49,9 +49,9 @@ MESSAGES = {
     },
     # Who should sign, and asking an owner.
     "choose": {
-        "en": "This document can be signed by more than one person. Who should sign? Reply with a number within {minutes} minute(s):\n"
+        "en": "More than one person can sign. Who should sign? Reply with a number within {minutes} minute(s):\n"
               "{options}\n{all} - All of them\n0 - Cancel",
-        "pt-br": "Este documento pode ser assinado por mais de uma pessoa. Quem deve assinar? "
+        "pt-br": "Mais de uma pessoa pode assinar. Quem deve assinar? "
                  "Responda com um número em até {minutes} minuto(s):\n{options}\n{all} - Todos\n0 - Cancelar",
     },
     "needs_approval": {"en": "needs approval", "pt-br": "precisa de aprovação"},
@@ -61,17 +61,30 @@ MESSAGES = {
     },
     "ask_owner": {
         "en": "To sign as {name}, I need the approval of {owner}. Reply within {minutes} minute(s):\n"
-              "1 - Send the document to {owner} and ask for approval\n0 - Cancel",
+              "1 - Send to {owner} and ask for approval\n0 - Cancel",
         "pt-br": "Para assinar como {name}, preciso da aprovação de {owner}. Responda em até {minutes} minuto(s):\n"
-                 "1 - Enviar o documento para {owner} e pedir a aprovação\n0 - Cancelar",
+                 "1 - Enviar para {owner} e pedir a aprovação\n0 - Cancelar",
     },
+    "about": {"en": "About {file}:", "pt-br": "Sobre {file}:"},
+    "about_many": {"en": "About {count} documents ({files}):", "pt-br": "Sobre {count} documentos ({files}):"},
+    "a_document": {"en": "document", "pt-br": "documento"},
     "owner_asked": {
         "en": "Done! I sent the document to {owners} for approval. You will receive it signed as soon as it is approved.",
         "pt-br": "Pronto! Enviei o documento para {owners} aprovar. Você o receberá assinado assim que for aprovado.",
     },
-    "owner_busy": {
-        "en": "{owner} still has another request waiting for an answer. Please send the document again in a few minutes.",
-        "pt-br": "{owner} ainda tem outro pedido aguardando resposta. Envie o documento novamente em alguns minutos.",
+    "owner_queued": {
+        "en": "Your document is in line for the approval of {owners}, with {ahead} request(s) ahead of it. "
+              "I will ask as soon as it is its turn; you do not need to send it again.",
+        "pt-br": "Seu documento está na fila para a aprovação de {owners}, com {ahead} pedido(s) na frente. "
+                 "Vou pedir assim que chegar a vez dele; não precisa enviar novamente.",
+    },
+    "queue_full": {
+        "en": "{owner} already has many requests waiting for approval, so I did not add this one. Please send it again later.",
+        "pt-br": "{owner} já tem muitos pedidos aguardando aprovação, então não incluí este. Envie novamente mais tarde.",
+    },
+    "duplicate": {
+        "en": "You had already sent this same file, so I am handling it only once.",
+        "pt-br": "Você já tinha enviado este mesmo arquivo, então estou tratando dele uma vez só.",
     },
     "answer_invalid": {
         "en": "That is not one of the options. Please reply with one of the numbers I listed.",
@@ -89,6 +102,12 @@ MESSAGES = {
         "pt-br": "Olá! Recebemos um pedido de {requester} para assinar o documento a seguir com o seu certificado digital. "
                  "Digite 1 para aprovar e 0 ou ignore para reprovar.",
     },
+    "approval_request_many": {
+        "en": "Hello! {requester} asks you to sign the following {count} documents with your digital certificate: {files}. "
+              "Reply 1 to approve all of them. Reply 0, or simply ignore this message, to refuse all of them.",
+        "pt-br": "Olá! Recebemos um pedido de {requester} para assinar os {count} documentos a seguir com o seu certificado digital: "
+                 "{files}. Digite 1 para aprovar todos e 0 ou ignore para reprovar todos.",
+    },
     "approved": {
         "en": "Approved! The document was signed.",
         "pt-br": "Aprovado! O documento foi assinado.",
@@ -103,11 +122,37 @@ MESSAGES = {
         "pt-br": "Desculpe, o seu certificado está vencido, revogado ou não pôde ser validado. Nada foi assinado.",
     },
     # Progress of a document with several signers.
-    "nobody": {"en": "nobody", "pt-br": "ninguém"},
     "progress": {
         "en": "Signed so far: {signed}. Still waiting for the approval of: {waiting}.",
         "pt-br": "Já assinaram: {signed}. Ainda aguardando a aprovação de: {waiting}.",
     },
+    # One message about several documents: a line for each thing that happened, followed by the files.
+    "summary": {"en": "Here is what happened with your documents:", "pt-br": "Veja o que aconteceu com os seus documentos:"},
+    "sum_signed_by": {"en": "Signed", "pt-br": "Assinado"},
+    "sum_fonts_replaced": {"en": "Converted from Word with replaced fonts ({fonts})",
+                           "pt-br": "Convertido do Word com fontes substituídas ({fonts})"},
+    "sum_no_location": {"en": "NOT signed, no clear place to sign", "pt-br": "NÃO assinado, sem local claro para assinar"},
+    "sum_rate_limited": {"en": "NOT signed, over the hourly limit", "pt-br": "NÃO assinado, acima do limite por hora"},
+    "sum_processing_failed": {"en": "NOT signed, could not be processed", "pt-br": "NÃO assinado, não foi possível processar"},
+    "sum_certificate_rejected": {"en": "NOT signed, certificate expired, revoked or not validated",
+                                 "pt-br": "NÃO assinado, certificado vencido, revogado ou não validado"},
+    "sum_owner_asked": {"en": "Sent to {owners} for approval", "pt-br": "Enviado para {owners} aprovar"},
+    "sum_owner_queued": {"en": "In line for the approval of {owners}", "pt-br": "Na fila para a aprovação de {owners}"},
+    "sum_queue_full": {"en": "NOT signed, {owner} has too many requests waiting; send again later",
+                       "pt-br": "NÃO assinado, {owner} tem pedidos demais aguardando; envie novamente mais tarde"},
+    "sum_duplicate": {"en": "Sent twice, handled once", "pt-br": "Enviado duas vezes, tratado uma vez só"},
+    "sum_choice_cancelled": {"en": "Cancelled", "pt-br": "Cancelado"},
+    "sum_choice_expired": {"en": "NOT signed, no answer in time", "pt-br": "NÃO assinado, sem resposta a tempo"},
+    "sum_progress": {"en": "Signed by {signed}, waiting for the approval of {waiting}",
+                     "pt-br": "Assinado por {signed}, aguardando a aprovação de {waiting}"},
+    "sum_partial": {"en": "Signed by {signed}, but NOT by {missing}", "pt-br": "Assinado por {signed}, mas NÃO por {missing}"},
+    "sum_not_signed": {"en": "NOT signed (not approved in time, refused or failed)",
+                       "pt-br": "NÃO assinado (não aprovado a tempo, reprovado ou falhou)"},
+    "sum_approved": {"en": "Approved and signed", "pt-br": "Aprovado e assinado"},
+    "sum_refused": {"en": "Refused", "pt-br": "Reprovado"},
+    "sum_approval_failed": {"en": "NOT signed, signing failed", "pt-br": "NÃO assinado, a assinatura falhou"},
+    "sum_approval_rejected": {"en": "NOT signed, certificate expired, revoked or not validated",
+                              "pt-br": "NÃO assinado, certificado vencido, revogado ou não validado"},
     "partial": {
         "en": "Signed by: {signed}. NOT signed by: {missing} (not approved in time, refused or failed).",
         "pt-br": "Assinado por: {signed}. NÃO assinado por: {missing} (não aprovou a tempo, reprovou ou falhou).",

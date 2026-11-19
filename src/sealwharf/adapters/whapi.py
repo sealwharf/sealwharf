@@ -1,6 +1,7 @@
 """Whapi operations with a fixed host and transfer limits."""
 
 import re
+import time
 import unicodedata
 
 import httpx
@@ -40,9 +41,12 @@ def check_channel(token: str, transport: httpx.BaseTransport | None = None) -> N
 
 
 class Whapi:
-    def __init__(self, token: str, transport: httpx.BaseTransport | None = None, addresses=None):
+    def __init__(self, token: str, transport: httpx.BaseTransport | None = None, addresses=None, pace: float = 0.0):
         # `addresses` remembers how WhatsApp identifies each configured number (the inbox does this).
+        # `pace` is the least time, in seconds, between two messages sent.
         self.addresses = addresses
+        self.pace = pace
+        self._last_sent = 0.0
         self.client = httpx.Client(base_url="https://gate.whapi.cloud", headers={"Authorization": f"Bearer {token}"},
                                    timeout=httpx.Timeout(30, connect=10), follow_redirects=False, transport=transport)
 
@@ -92,15 +96,23 @@ class Whapi:
         validate_pdf(data)
         return data
 
+    def _wait_turn(self) -> None:
+        remaining = self._last_sent + self.pace - time.monotonic()
+        if remaining > 0:
+            time.sleep(remaining)
+        self._last_sent = time.monotonic()
+
     def send_pdf(self, sender: str, data: bytes, filename: str | None = None, *, signed: bool = True) -> None:
         """Send a PDF; an unsigned one, forwarded for approval, keeps its plain name."""
         validate_pdf(data)
+        self._wait_turn()
         name = signed_filename(filename, " - signed" if signed else "")
         response = self.client.post("/messages/document", data={"to": f"{self.resolve(sender)}@s.whatsapp.net", "mime_type": "application/pdf", "filename": name},
                                     files={"media": (name, data, "application/pdf")})
         response.raise_for_status()
 
     def send_text(self, sender: str, text: str) -> None:
+        self._wait_turn()
         response = self.client.post("/messages/text", json={"to": f"{self.resolve(sender)}@s.whatsapp.net", "body": text})
         response.raise_for_status()
 

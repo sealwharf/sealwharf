@@ -162,7 +162,8 @@ def test_worker_signs_with_the_token_where_an_alias_is_written(token, tmp_path):
     for _ in range(3):
         assert process_one(inbox, Chat(), signers)
     # One clear place signs; the name written twice, or another person's name, does not.
-    assert len(sent) == 1 and len(texts) == 2
+    assert len(sent) == 1 and len(texts) == 1
+    assert "- Signed: a.pdf" in texts[0] and "no clear place to sign: b.pdf, c.pdf" in texts[0]
     assert PdfFileReader(BytesIO(sent[0])).embedded_signatures[0].signer_cert.dump() == der
 
 

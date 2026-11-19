@@ -4,6 +4,7 @@ Only documents and a fixed set of short commands are stored. Free text is
 never kept, so the database holds no conversation content.
 """
 
+import json
 import re
 import sqlite3
 import time
@@ -41,7 +42,7 @@ class PendingSignature(NamedTuple):
     field_name: str | None
     status: str  # offered (waiting for the requester's choice), pending (waiting for the owner), signed, expired, rejected or failed
     owner: str | None
-    expires_at: float | None
+    expires_at: float | None  # None while the question waits in line to be asked
 
 
 class SigningRequestRecord(NamedTuple):
@@ -51,6 +52,7 @@ class SigningRequestRecord(NamedTuple):
     filename: str | None
     original_sha256: str
     original_size: int
+    question: str | None = None  # what the requester is asked, kept until it is their turn
 
 
 def parse_command(text: object) -> str | None:
@@ -142,6 +144,11 @@ class Inbox:
                        "PRIMARY KEY (request_id, signer_id))")
             db.execute("CREATE TABLE IF NOT EXISTS marks (name TEXT PRIMARY KEY, value REAL NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS addresses (number TEXT PRIMARY KEY, address TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, recipient TEXT NOT NULL, "
+                       "key TEXT NOT NULL, filename TEXT, data TEXT NOT NULL)")
+            for table, column in (("jobs", "digest"), ("requests", "question")):
+                if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
 
     def connect(self):
         return sqlite3.connect(self.path, timeout=10)
@@ -188,6 +195,27 @@ class Inbox:
                               "AND rowid <= (SELECT rowid FROM jobs WHERE message_id=?)",
                               (sender, f"-{int(hours * 3600)} seconds", message_id)).fetchone()[0]
 
+    def documents_in_flight(self, sender: str, settle_seconds: float = 0) -> bool:
+        """Whether this number still has documents to be read, or sent one a moment ago."""
+        with self.connect() as db:
+            return db.execute("SELECT 1 FROM jobs WHERE sender=? AND kind='document' AND (state IN ('pending', 'processing') "
+                              "OR (? > 0 AND created_at > datetime('now', ?))) LIMIT 1",
+                              (sender, settle_seconds, f"-{int(settle_seconds)} seconds")).fetchone() is not None
+
+    def mark_document(self, message_id: str, sender: str, digest: str) -> bool:
+        """Record what a document is; return True when the same number already has that same file in hand.
+
+        A file counts as in hand while it waits for an answer, so nobody is asked twice about it.
+        """
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            repeated = db.execute(
+                "SELECT 1 FROM jobs WHERE sender=? AND digest=? AND message_id<>? "
+                "AND state IN ('awaiting_choice', 'awaiting_confirmation') LIMIT 1",
+                (sender, digest, message_id)).fetchone() is not None
+            db.execute("UPDATE jobs SET digest=? WHERE message_id=?", (None if repeated else digest, message_id))
+        return repeated
+
     def recover_interrupted(self, lock: WorkerLock) -> tuple[int, int]:
         """Recover jobs only while holding the exclusive lock for this inbox.
 
@@ -223,14 +251,15 @@ class Inbox:
     def create_request(self, record: SigningRequestRecord, signatures: list[PendingSignature]) -> None:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?, ?)", (*record, time.time()))
+            db.execute("INSERT INTO requests (request_id, message_id, requester, filename, original_sha256, original_size, "
+                       "question, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (*record, time.time()))
             db.executemany("INSERT INTO request_signers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                            [(s.request_id, s.signer_id, s.page, *s.box, s.field_name, s.status, s.owner, s.expires_at)
                             for s in signatures])
 
     def get_request(self, request_id: str) -> SigningRequestRecord | None:
         with self.connect() as db:
-            row = db.execute("SELECT request_id, message_id, requester, filename, original_sha256, original_size "
+            row = db.execute("SELECT request_id, message_id, requester, filename, original_sha256, original_size, question "
                              "FROM requests WHERE request_id=?", (request_id,)).fetchone()
         return SigningRequestRecord(*row) if row else None
 
@@ -246,27 +275,52 @@ class Inbox:
     def pending_for_owner(self, owner: str) -> list[PendingSignature]:
         return self._signatures("owner=? AND status='pending'", (owner,))
 
-    def open_question(self, number: str, now: float) -> tuple[str, str] | None:
-        """Return the newest question still waiting for this number's answer.
+    def open_question(self, number: str, now: float) -> tuple[str, list[str]] | None:
+        """Return the one question this number was asked and has not answered yet.
 
-        The result is ("choice", request) when the number is a requester asked
-        who should sign, or ("approval", request) when it is an owner asked to
-        approve. A short reply such as "1" always answers that one question.
+        The result is ("choice", requests) when the number is a requester asked
+        who should sign, or ("approval", requests) when it is an owner asked to
+        approve. One question may cover several documents, oldest first, and a
+        short reply such as "1" always answers that one question. Questions
+        still waiting in line have not been asked and are never returned.
         """
         with self.connect() as db:
-            row = db.execute(
-                "SELECT s.status, r.request_id FROM requests r JOIN request_signers s ON s.request_id = r.request_id "
+            rows = db.execute(
+                "SELECT DISTINCT s.status, r.request_id, r.created_at, r.rowid FROM requests r "
+                "JOIN request_signers s ON s.request_id = r.request_id "
                 "WHERE s.expires_at > ? AND ((s.status='offered' AND r.requester=?) OR (s.status='pending' AND s.owner=?)) "
-                "ORDER BY r.created_at DESC LIMIT 1", (now, number, number)).fetchone()
-        return ("choice" if row[0] == "offered" else "approval", row[1]) if row else None
+                "ORDER BY r.created_at, r.rowid", (now, number, number)).fetchall()
+        if not rows:
+            return None
+        status = rows[-1][0]
+        return ("choice" if status == "offered" else "approval", [row[1] for row in rows if row[0] == status])
+
+    def waiting_questions(self) -> list[tuple[str, str, str, str, str | None]]:
+        """Questions not asked yet, oldest first: (number to ask, kind, request, requester, question text)."""
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT DISTINCT CASE s.status WHEN 'offered' THEN r.requester ELSE s.owner END, s.status, r.request_id, "
+                "r.requester, r.question, r.created_at, r.rowid FROM requests r "
+                "JOIN request_signers s ON s.request_id = r.request_id "
+                "WHERE s.expires_at IS NULL AND s.status IN ('offered', 'pending') ORDER BY r.created_at, r.rowid").fetchall()
+        return [(row[0], "choice" if row[1] == "offered" else "approval", row[2], row[3], row[4]) for row in rows]
+
+    def ask(self, request_id: str, kind: str, number: str, expires_at: float) -> None:
+        """Start the clock of a question at the moment it is asked."""
+        with self.connect() as db:
+            if kind == "choice":
+                db.execute("UPDATE request_signers SET expires_at=? WHERE request_id=? AND status='offered' AND expires_at IS NULL",
+                           (expires_at, request_id))
+            else:
+                db.execute("UPDATE request_signers SET expires_at=? WHERE request_id=? AND status='pending' AND owner=? "
+                           "AND expires_at IS NULL", (expires_at, request_id, number))
+
+    def requests_waiting_for(self, owner: str) -> int:
+        """How many documents wait for this owner's approval, asked or still in line."""
+        return len({entry.request_id for entry in self.pending_for_owner(owner)})
 
     def expired_signatures(self, now: float) -> list[PendingSignature]:
         return self._signatures("status='pending' AND expires_at <= ?", (now,))
-
-    def offers_for(self, requester: str) -> list[PendingSignature]:
-        """The signers offered to a requester who has not chosen yet, newest document first."""
-        return self._signatures("status='offered' AND request_id IN (SELECT request_id FROM requests WHERE requester=? "
-                                "ORDER BY created_at DESC LIMIT 1)", (requester,))
 
     def expired_offers(self, now: float) -> list[str]:
         return sorted({entry.request_id for entry in self._signatures("status='offered' AND expires_at <= ?", (now,))})
@@ -274,6 +328,25 @@ class Inbox:
     def set_signature_status(self, request_id: str, signer_id: str, status: str) -> None:
         with self.connect() as db:
             db.execute("UPDATE request_signers SET status=? WHERE request_id=? AND signer_id=?", (status, request_id, signer_id))
+
+    # Outcomes told to a person, gathered so that many documents make one message.
+
+    def add_note(self, recipient: str, key: str, filename: str | None, values: dict) -> None:
+        with self.connect() as db:
+            db.execute("INSERT INTO notes (recipient, key, filename, data) VALUES (?, ?, ?, ?)",
+                       (recipient, key, filename, json.dumps(values)))
+
+    def note_recipients(self) -> list[str]:
+        with self.connect() as db:
+            return [row[0] for row in db.execute("SELECT recipient FROM notes GROUP BY recipient ORDER BY MIN(id)")]
+
+    def take_notes(self, recipient: str) -> list[tuple[str, str | None, dict]]:
+        """Remove and return a person's notes: each is told at most once, even if sending fails."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute("SELECT key, filename, data FROM notes WHERE recipient=? ORDER BY id", (recipient,)).fetchall()
+            db.execute("DELETE FROM notes WHERE recipient=?", (recipient,))
+        return [(key, filename, json.loads(data)) for key, filename, data in rows]
 
     def delete_request(self, request_id: str) -> None:
         with self.connect() as db:

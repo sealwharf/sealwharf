@@ -55,6 +55,7 @@ class Contact:
     number: str
     name: str | None = None
     lang: str = DEFAULT_LANGUAGE
+    limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,8 @@ class AppConfig:
     public_url: str | None = None
     whapi_token: str | None = field(default=None, repr=False)
     tunnel_token: str | None = field(default=None, repr=False)
+    # Contacts with an hourly limit of their own, for people who send documents in bulk.
+    request_limits: dict[str, int] = field(default_factory=dict)
 
     @property
     def senders(self) -> frozenset[str]:
@@ -122,7 +125,9 @@ def load_config(path: Path) -> AppConfig:
     if (isinstance(per_hour, bool) or not isinstance(per_hour, int) or not 1 <= per_hour <= 1000
             or isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 60):
         raise ValueError("Limits must be whole numbers: 1-1000 requests per hour and 1-60 confirmation minutes.")
-    return AppConfig(signers, languages, contact_names, per_hour, minutes, public_url, tokens["whapi_token"], tokens["tunnel_token"])
+    request_limits = {contact.number: contact.limit for contact in contacts.values() if contact.limit is not None}
+    return AppConfig(signers, languages, contact_names, per_hour, minutes, public_url, tokens["whapi_token"], tokens["tunnel_token"],
+                     request_limits)
 
 
 def _parse_contacts(value: object, default_language: str) -> dict[str, Contact]:
@@ -133,7 +138,7 @@ def _parse_contacts(value: object, default_language: str) -> dict[str, Contact]:
     for identifier, person in value.items():
         if not isinstance(identifier, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", identifier):
             raise ValueError("Each contact needs a short id of letters, digits, underscores or hyphens.")
-        if (not isinstance(person, dict) or set(person) - {"name", "number", "lang"}
+        if (not isinstance(person, dict) or set(person) - {"name", "number", "lang", "limit"}
                 or not isinstance(person.get("number"), str) or not NUMBER.fullmatch(person["number"])):
             raise ValueError(f"Contact {identifier} needs its number in quotes, with country and area codes and digits only.")
         name = person.get("name")
@@ -145,7 +150,10 @@ def _parse_contacts(value: object, default_language: str) -> dict[str, Contact]:
         number = canonical_number(person["number"])
         if any(other.number == number for other in contacts.values()):
             raise ValueError(f"Contact {identifier} repeats the number of another contact.")
-        contacts[identifier] = Contact(number, name.strip() if name else None, language)
+        limit = person.get("limit")
+        if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 5000):
+            raise ValueError(f"The limit of contact {identifier} must be a whole number of documents per hour, from 1 to 5000.")
+        contacts[identifier] = Contact(number, name.strip() if name else None, language, limit)
     return contacts
 
 

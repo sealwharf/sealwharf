@@ -110,6 +110,15 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 
 When the owner replies `1`, the document is signed and sent back to you.
 
+**Sending many documents at once.** Select all the files and send them together. The bot treats them as one batch:
+
+- It says once that it received them, and at the end sends one summary: which files were signed and which were not, and why.
+- If it needs to ask you something, it asks once for all the documents that have the same question.
+- If an owner must approve, the owner gets one message with the list and all the files, and answers once: `1` approves all of them, `0` refuses all of them.
+- The same file sent twice is handled once.
+
+**One question at a time.** Each person has only one open question, so a plain `1` or `0` never answers the wrong document. If the owner is still answering another request, yours waits in line and the bot tells you so; you do not need to send it again. The time to answer starts when the question is asked. Up to 20 documents may wait for the same owner.
+
 ## Adding people and certificates
 
 Everything lives in `config/sealwharf.yaml`. Register each person once under `contacts`, then use their ids in the certificates:
@@ -295,7 +304,8 @@ To get exactly the same result as on your computer, do one of these:
 - **Record of signatures.** Every signature is recorded with the time, who asked, who approved and the fingerprint of the document. Read the record with `docker compose exec sealwharf cat /data/audit.jsonl`.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.
 - **Expiring certificates.** From 30 days before a certificate expires, its owner gets a daily reminder.
-- **Limits.** Each number may send 20 documents per hour, and a question stays open for 5 minutes. Both can be changed under `limits` in the configuration.
+- **Limits.** Each number may send 20 documents per hour, and a question stays open for 5 minutes. Both can be changed under `limits` in the configuration. For someone who sends documents in bulk, add `limit: 200` (documents per hour) to that person in `contacts`.
+- **Large batches take a moment.** Documents are signed one after the other, and the bot leaves a second between its messages so that WhatsApp does not take them for spam.
 - **Signed documents can be signed again.** Send a PDF that already has signatures to add another signer; the earlier signatures stay valid.
 - **Stopping.** `docker compose --profile token down` stops everything. Your configuration and records are kept.
 

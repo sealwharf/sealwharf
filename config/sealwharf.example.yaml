@@ -13,6 +13,7 @@ contacts:
     name: John Doe                  # how the bot refers to this person in messages
     number: "5511999999999"         # digits only, with country and area codes, in quotes
     lang: en
+    limit: 200                      # optional: documents per hour for this person, for sending in bulk
   jane:
     name: Jane Doe
     number: "5521888888888"

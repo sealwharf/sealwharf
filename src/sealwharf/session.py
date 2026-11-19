@@ -104,10 +104,12 @@ def main() -> None:
         sys.exit(f"Could not start: {exc} Fix config/sealwharf.yaml; the check command lists every problem.")
     secret = webhook_secret(create=True)
     backup_configuration(config_path(), data)
-    runtime = Runtime(data, config.requests_per_hour, config.confirmation_minutes, config.languages, config.names)
+    runtime = Runtime(data, config.requests_per_hour, config.confirmation_minutes, config.languages, config.names,
+                      config.request_limits)
     server = tunnel = None
     model = LocalModelSession()
-    client = Whapi(config.whapi_token, addresses=Inbox(data / "inbox.db"))
+    # A short pause between messages keeps a large batch from looking like a flood to WhatsApp.
+    client = Whapi(config.whapi_token, addresses=Inbox(data / "inbox.db"), pace=1.0)
     db_path = data / "inbox.db"
     worker_lock = WorkerLock.for_database(db_path)
     stage = "acquiring the worker lock"

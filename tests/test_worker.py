@@ -155,19 +155,18 @@ def test_certificate_selection_respects_each_allowlist_and_ambiguity(tmp_path, m
         assert process_one(inbox, client, (jane, john))
     # One signer signs at once; with two, the requester is asked and then chooses both.
     assert signed_with == [(Path("john.p12"), b"john-secret")] and sent == [first]
-    assert notices == [second, first]
+    assert notices == [second, first, first]
     inbox.add([("choice", "", None, first, "text", "answer all")])
     assert process_one(inbox, client, (jane, john))
     assert signed_with == [(Path("john.p12"), b"john-secret"), (Path("jane.p12"), b"jane-secret"),
                            (Path("john.p12"), b"john-secret")]
     assert sent == [first, first]
-    del notices[1]
     jane_long = UnlockedSigner(SignerConfig("jane", "Jane Middle Example", Path("jane.p12"),
                                allowed_senders=frozenset({first})), b"jane-secret", b"jane-fingerprint")
     inbox.add([("d", "both", "four.pdf", first)])
     assert process_one(inbox, client, (jane_long, john))
     assert sent == [first, first]
-    assert notices == [second, first]
+    assert notices == [second] + [first] * 4
 
 
 def test_multiple_signers_are_not_partially_signed_when_a_position_is_missing(tmp_path, monkeypatch):
@@ -216,12 +215,11 @@ def test_initialed_names_identify_signers_only_when_unambiguous():
 
 
 def test_replaced_fonts_are_mentioned_and_the_document_is_still_signed(tmp_path, monkeypatch):
-    from sealwharf.application.worker import Runtime
     inbox = Inbox(tmp_path / "queue.db")
     inbox.add([("message", "media", "Report.docx", "5511999999999")])
     sent, notes = [], []
-    client = SimpleNamespace(download_document=lambda _: b"PK\x03\x04docx", send_pdf=lambda _, data, name: sent.append(data))
-    monkeypatch.setattr(Runtime, "mention", lambda self, client, number, key, **values: notes.append((key, values)))
+    client = SimpleNamespace(download_document=lambda _: b"PK\x03\x04docx", send_pdf=lambda _, data, name: sent.append(data),
+                             send_text=lambda _, text: notes.append(text))
     monkeypatch.setattr("sealwharf.application.worker.substituted_fonts", lambda _: (("Rare Face", "DejaVu Sans"),))
     monkeypatch.setattr("sealwharf.application.worker.convert_docx_to_pdf", lambda _: b"pdf")
     monkeypatch.setattr("sealwharf.application.worker.validate_pdf", lambda *_: None)
@@ -229,4 +227,4 @@ def test_replaced_fonts_are_mentioned_and_the_document_is_still_signed(tmp_path,
     monkeypatch.setattr("sealwharf.application.worker.sign_pdf", lambda *_: b"signed")
     assert process_one(inbox, client, signer())
     assert sent == [b"signed"] and state(inbox) == "sent"
-    assert ("fonts_replaced", {"fonts": "Rare Face → DejaVu Sans"}) in notes
+    assert len(notes) == 1 and "replaced fonts (Rare Face → DejaVu Sans): Report.docx" in notes[0] and "- Signed: Report.docx" in notes[0]

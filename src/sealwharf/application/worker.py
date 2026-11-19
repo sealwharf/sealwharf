@@ -1,8 +1,13 @@
 """Process queued chat events: sign, ask for confirmation, verify and report.
 
 A certificate is used without asking only for its owner and for preparers
-marked as auto-trusted. Any other request waits for the owner to reply with a
-one-time code that is bound to the SHA-256 of the exact document.
+marked as auto-trusted. Any other request waits for the owner's approval,
+which is bound to the SHA-256 of the exact document.
+
+A person has one open question at a time and answers it with a plain digit.
+Further questions wait in line, and questions that are alike are asked
+together, so one answer may cover several documents. What happened to each
+document is gathered into one message per person.
 """
 
 import hashlib
@@ -39,6 +44,8 @@ from ..documents.visual_position import suggest_visual_positions
 from ..messages import DEFAULT_LANGUAGE, text
 from .signers import UnlockedSigner, token_settings, words
 
+SETTLE_SECONDS = 5
+
 
 @dataclass(frozen=True)
 class Runtime:
@@ -48,6 +55,11 @@ class Runtime:
     confirmation_minutes: int = 5
     languages: dict[str, str] = field(default_factory=dict)
     names: dict[str, str] = field(default_factory=dict)
+    limits: dict[str, int] = field(default_factory=dict)
+    # A question waits this long after the requester's last document, so documents sent together share it.
+    settle_seconds: float = field(default_factory=lambda: SETTLE_SECONDS)
+    # How many documents may wait for one owner's approval.
+    queue_limit: int = 20
 
     @property
     def audit(self) -> AuditLog:
@@ -58,6 +70,10 @@ class Runtime:
 
     def language(self, number: str) -> str:
         return self.languages.get(number, DEFAULT_LANGUAGE)
+
+    def limit(self, number: str) -> int:
+        """How many documents this number may send per hour."""
+        return self.limits.get(number, self.requests_per_hour)
 
     def called(self, number: str) -> str:
         """How a person is referred to in a message: by contact name, or by number when there is none."""
@@ -76,6 +92,36 @@ class Runtime:
             self.say(client, number, key, **values)
         except Exception:
             operational_logger().info("courtesy message not delivered key=%s", key)
+
+
+# Telling people what happened.
+
+def _note(inbox: Inbox, recipient: str, key: str, filename: str | None = None, **values: object) -> None:
+    """Keep what happened to a document, to be told together with the person's other documents."""
+    inbox.add_note(recipient, key, filename, values)
+
+
+def tell_outcomes(inbox: Inbox, client, runtime: Runtime) -> None:
+    """Tell each person what happened, once all the documents they sent have been read.
+
+    One document gets its own message; several are gathered into one summary.
+    """
+    for recipient in inbox.note_recipients():
+        if inbox.documents_in_flight(recipient):
+            continue
+        notes = inbox.take_notes(recipient)
+        language = runtime.language(recipient)
+        if len(notes) == 1:
+            message = text(language, notes[0][0], **notes[0][2])
+        else:
+            groups: dict[str, list[str]] = {}
+            for key, filename, values in notes:
+                groups.setdefault(text(language, "sum_" + key, **values), []).append(_file(runtime, recipient, filename))
+            message = "\n".join([text(language, "summary")] + [f"- {label}: {', '.join(files)}" for label, files in groups.items()])
+        try:
+            client.send_text(recipient, message)
+        except Exception:
+            operational_logger().info("outcome not delivered documents=%d", len(notes))
 
 
 # Finding who signs, and where.
@@ -236,21 +282,21 @@ def _finish(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: 
     missing = _names(signers, entries, "expired", "rejected", "failed")
     requester = record.requester
     if waiting:
-        runtime.say(client, requester, "progress", signed=signed or text(runtime.language(requester), "nobody"), waiting=waiting)
+        if signed:
+            _note(inbox, requester, "progress", record.filename, signed=signed, waiting=waiting)
         return
     if signed:
         # A disruption during sending leaves an uncertain state; do not retry automatically.
         inbox.set_state(record.message_id, "sending")
         client.send_pdf(requester, runtime.pending_file(request_id).read_bytes(), record.filename)
-        if missing:
-            runtime.say(client, requester, "partial", signed=signed, missing=missing)
         inbox.set_state(record.message_id, "sent")
-        if not missing:
-            runtime.mention(client, requester, "signed_by", signed=signed)
+        if missing:
+            _note(inbox, requester, "partial", record.filename, signed=signed, missing=missing)
+        else:
+            _note(inbox, requester, "signed_by", record.filename, signed=signed)
     else:
-        inbox.set_state(record.message_id, "review_sending")
-        runtime.say(client, requester, "not_signed", missing=missing)
         inbox.set_state(record.message_id, "needs_review")
+        _note(inbox, requester, "not_signed", record.filename, missing=missing)
     _discard(inbox, runtime, request_id)
 
 
@@ -262,7 +308,7 @@ def expire_requests(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
         _discard(inbox, runtime, request_id)
         if record is not None:
             inbox.set_state(record.message_id, "needs_review")
-            runtime.mention(client, record.requester, "choice_expired")
+            _note(inbox, record.requester, "choice_expired", record.filename)
     for entry in inbox.expired_signatures(moment):
         inbox.set_signature_status(entry.request_id, entry.signer_id, "expired")
         operational_logger().info("confirmation expired request=%s certificate=%s", entry.request_id, entry.signer_id)
@@ -276,41 +322,129 @@ def expire_requests(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
 
 
 def _await_confirmations(inbox: Inbox, client, signers, runtime: Runtime, job: Job, document: bytes, planned) -> None:
-    """Sign for trusted requesters now and ask the other owners to approve."""
+    """Sign for trusted requesters now and put the other signatures in line for their owners' approval."""
     request_id = uuid4().hex[:12]
     current = document
     entries = []
-    expires_at = time.time() + runtime.confirmation_minutes * 60
     for signer, position in planned:
         base = (request_id, signer.config.id, position.page, tuple(position.box), getattr(position, "field_name", None))
         if signer.config.needs_confirmation(job.sender):
-            entries.append(PendingSignature(*base, "pending", signer.config.owner, expires_at))
+            entries.append(PendingSignature(*base, "pending", signer.config.owner, None))
         else:
             signed = _sign_one(current, _request(signer, position))
             _audit(runtime, signer, request_id=request_id, requester=job.sender, confirmed_by=None, before=current, after=signed)
             current = signed
             entries.append(PendingSignature(*base, "signed", signer.config.owner, None))
+    owners = list(dict.fromkeys(entry.owner for entry in entries if entry.status == "pending"))
+    # Requests of other people that each owner has to answer before this one.
+    ahead = sum(1 for owner in owners for waiting in {entry.request_id for entry in inbox.pending_for_owner(owner)}
+                if (other := inbox.get_request(waiting)) is not None and other.requester != job.sender)
     _write_pending(runtime.pending_file(request_id), current)
     inbox.create_request(SigningRequestRecord(request_id, job.message_id, job.sender, job.filename, _digest(document), len(document)), entries)
-    try:
-        owners = list(dict.fromkeys(entry.owner for entry in entries if entry.status == "pending"))
-        for owner in owners:
-            # The owner reads who is asking, then sees exactly what will be signed.
-            runtime.say(client, owner, "approval_request", requester=runtime.person(job.sender))
-            client.send_pdf(owner, current, job.filename, signed=False)
-        inbox.set_state(job.message_id, "awaiting_confirmation")
-        if any(entry.status == "signed" for entry in entries):
-            _finish(inbox, client, signers, runtime, request_id)
-        else:
-            runtime.say(client, job.sender, "owner_asked", owners=", ".join(runtime.called(owner) for owner in owners))
-    except Exception:
-        _discard(inbox, runtime, request_id)
-        raise
+    inbox.set_state(job.message_id, "awaiting_confirmation")
+    called = ", ".join(runtime.called(owner) for owner in owners)
+    if any(entry.status == "signed" for entry in entries):
+        _finish(inbox, client, signers, runtime, request_id)
+    elif ahead:
+        _note(inbox, job.sender, "owner_queued", job.filename, owners=called, ahead=ahead)
+    else:
+        _note(inbox, job.sender, "owner_asked", job.filename, owners=called)
     operational_logger().info("approval requested request=%s", request_id)
 
 
-def _approve(inbox: Inbox, client, signers, runtime: Runtime, owner: str, request_id: str, answer: str) -> None:
-    """Act on an owner's reply to an approval request: 1 signs, 0 refuses."""
+def ask_questions(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: Runtime, *, now: float | None = None) -> None:
+    """Ask each person the next question in their line, never more than one at a time.
+
+    Questions that are alike are asked together: the same choice for several
+    documents, or the approval of several documents sent by the same person.
+    """
+    moment = time.time() if now is None else now
+    waiting = inbox.waiting_questions()
+    seen: set[str] = set()
+    for number, kind, _, requester, question in waiting:
+        if number in seen:
+            continue
+        seen.add(number)
+        # More documents may still join this question while the requester is sending.
+        if inbox.open_question(number, moment) is not None or inbox.documents_in_flight(requester, runtime.settle_seconds):
+            continue
+        requests = [item[2] for item in waiting if item[:2] == (number, kind) and item[3] == requester
+                    and (kind == "approval" or item[4] == question)]
+        expires_at = moment + runtime.confirmation_minutes * 60
+        try:
+            if kind == "choice":
+                _ask_choice(inbox, client, runtime, number, requests, question or "")
+            else:
+                _ask_approval(inbox, client, runtime, number, requests, requester)
+            for request_id in requests:
+                inbox.ask(request_id, kind, number, expires_at)
+        except Exception:
+            operational_logger().info("question not delivered kind=%s documents=%d", kind, len(requests))
+            _abandon(inbox, client, signers, runtime, number, kind, requests)
+
+
+def _file(runtime: Runtime, number: str, filename: str | None) -> str:
+    """How a document is called in a message to this person."""
+    name = (filename or "").strip() or text(runtime.language(number), "a_document")
+    return name if len(name) <= 60 else name[:57] + "..."
+
+
+def _files(inbox: Inbox, runtime: Runtime, number: str, requests: list[str]) -> str:
+    records = [inbox.get_request(request_id) for request_id in requests]
+    return ", ".join(_file(runtime, number, record.filename) for record in records if record is not None)
+
+
+def _ask_choice(inbox: Inbox, client, runtime: Runtime, requester: str, requests: list[str], question: str) -> None:
+    language = runtime.language(requester)
+    files = _files(inbox, runtime, requester, requests)
+    header = (text(language, "about", file=files) if len(requests) == 1
+              else text(language, "about_many", count=len(requests), files=files))
+    client.send_text(requester, header + "\n" + question)
+
+
+def _ask_approval(inbox: Inbox, client, runtime: Runtime, owner: str, requests: list[str], requester: str) -> None:
+    # The owner reads who is asking, then sees exactly what will be signed.
+    if len(requests) == 1:
+        runtime.say(client, owner, "approval_request", requester=runtime.person(requester))
+    else:
+        runtime.say(client, owner, "approval_request_many", requester=runtime.person(requester), count=len(requests),
+                    files=_files(inbox, runtime, owner, requests))
+    for request_id in requests:
+        record = inbox.get_request(request_id)
+        client.send_pdf(owner, runtime.pending_file(request_id).read_bytes(), record.filename if record else None, signed=False)
+
+
+def _abandon(inbox: Inbox, client, signers, runtime: Runtime, number: str, kind: str, requests: list[str]) -> None:
+    """Close questions that could not be asked, telling the requester that nothing more will be signed."""
+    for request_id in requests:
+        record = inbox.get_request(request_id)
+        if record is None:
+            continue
+        try:
+            if kind == "choice":
+                _discard(inbox, runtime, request_id)
+                inbox.set_state(record.message_id, "failed")
+                _note(inbox, record.requester, "processing_failed", record.filename)
+            else:
+                for entry in inbox.request_signatures(request_id):
+                    if entry.status == "pending" and entry.owner == number:
+                        inbox.set_signature_status(request_id, entry.signer_id, "failed")
+                _finish(inbox, client, signers, runtime, request_id)
+        except Exception:
+            inbox.set_state(record.message_id, "uncertain")
+            _discard(inbox, runtime, request_id)
+
+
+def _approve(inbox: Inbox, client, signers, runtime: Runtime, owner: str, requests: list[str], answer: str) -> None:
+    """Act on an owner's reply to an approval request: 1 signs every document that was asked, 0 refuses them all."""
+    if answer not in ("0", "1", "all"):
+        runtime.say(client, owner, "answer_invalid")
+        return
+    for request_id in requests:
+        _approve_one(inbox, client, signers, runtime, owner, request_id, answer)
+
+
+def _approve_one(inbox: Inbox, client, signers, runtime: Runtime, owner: str, request_id: str, answer: str) -> None:
     record = inbox.get_request(request_id)
     entries = [entry for entry in inbox.request_signatures(request_id) if entry.status == "pending" and entry.owner == owner]
     by_id = {signer.config.id: signer for signer in signers if signer.config.owner == owner}
@@ -319,11 +453,8 @@ def _approve(inbox: Inbox, client, signers, runtime: Runtime, owner: str, reques
     if answer == "0":
         for entry in entries:
             inbox.set_signature_status(request_id, entry.signer_id, "rejected")
-        runtime.say(client, owner, "refused")
+        _note(inbox, owner, "refused", record.filename)
         _finish(inbox, client, signers, runtime, request_id)
-        return
-    if answer not in ("1", "all"):
-        runtime.say(client, owner, "answer_invalid")
         return
     path = runtime.pending_file(request_id)
     try:
@@ -340,12 +471,12 @@ def _approve(inbox: Inbox, client, signers, runtime: Runtime, owner: str, reques
     except Exception as exc:
         for entry in entries:
             inbox.set_signature_status(request_id, entry.signer_id, "failed")
-        runtime.say(client, owner, "approval_rejected" if isinstance(exc, CertificateRejected) else "approval_failed")
+        _note(inbox, owner, "approval_rejected" if isinstance(exc, CertificateRejected) else "approval_failed", record.filename)
     else:
         for signer, before, after in steps:
             inbox.set_signature_status(request_id, signer.config.id, "signed")
             _audit(runtime, signer, request_id=request_id, requester=record.requester, confirmed_by=owner, before=before, after=after)
-        runtime.say(client, owner, "approved")
+        _note(inbox, owner, "approved", record.filename)
     _finish(inbox, client, signers, runtime, request_id)
 
 
@@ -374,12 +505,13 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
         inbox.set_state(message_id, "needs_review")
         return
     try:
-        if inbox.recent_documents(sender, message_id) > runtime.requests_per_hour:
-            inbox.set_state(message_id, "review_sending")
-            runtime.say(client, sender, "rate_limited")
+        if inbox.recent_documents(sender, message_id) > runtime.limit(sender):
             inbox.set_state(message_id, "rate_limited")
+            _note(inbox, sender, "rate_limited", filename)
             return
-        runtime.mention(client, sender, "received")
+        # Documents sent together are acknowledged once.
+        if inbox.recent_documents(sender, message_id, hours=1 / 60) == 1:
+            runtime.mention(client, sender, "received")
         document = client.download_document(media_id)
         if job.body == "verify":
             language = runtime.language(sender)
@@ -389,12 +521,15 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
             client.send_text(sender, report)
             inbox.set_state(message_id, "verified")
             return
+        if inbox.mark_document(message_id, sender, _digest(document)):
+            inbox.set_state(message_id, "duplicate")
+            _note(inbox, sender, "duplicate", filename)
+            return
         if document.startswith(b"PK\x03\x04"):
             replaced = substituted_fonts(document)
             document = convert_docx_to_pdf(document)
             if replaced:
-                runtime.mention(client, sender, "fonts_replaced",
-                                fonts=", ".join(f"{font} → {other}" for font, other in replaced))
+                _note(inbox, sender, "fonts_replaced", filename, fonts=", ".join(f"{font} → {other}" for font, other in replaced))
         validate_pdf(document)
         document = normalize_rotation(document)
         referenced = _referenced_signers(document, authorized)
@@ -404,9 +539,8 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
                    if (position := _locate_signature(document, signer, contextual_review, general_suggest)) is not None]
         unplaced = [signer for signer in referenced if all(signer is not placed for placed, _ in located)]
         if not located:
-            inbox.set_state(message_id, "review_sending")
-            runtime.say(client, sender, "no_location", names=", ".join(s.config.name for s in (referenced or authorized)))
             inbox.set_state(message_id, "needs_review")
+            _note(inbox, sender, "no_location", filename, names=", ".join(s.config.name for s in (referenced or authorized)))
             return
         if _overlapping([position for _, position in located]):
             raise ValueError("Signature areas overlap.")
@@ -415,31 +549,25 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
         else:
             _offer_choice(inbox, client, runtime, job, document, located, unplaced)
     except Exception as exc:
-        _report_failure(inbox, client, runtime, message_id, sender, exc)
+        _report_failure(inbox, message_id, sender, filename, exc)
 
 
-def _report_failure(inbox: Inbox, client, runtime: Runtime, message_id: str, sender: str, exc: Exception) -> None:
+def _report_failure(inbox: Inbox, message_id: str, sender: str, filename: str | None, exc: Exception) -> None:
     # Never log API exceptions that may contain URLs or credentials.
     if inbox.get_state(message_id) in ("sending", "review_sending"):
         inbox.set_state(message_id, "uncertain")
         return
-    inbox.set_state(message_id, "failure_sending")
-    try:
-        runtime.say(client, sender, "certificate_rejected" if isinstance(exc, CertificateRejected) else "processing_failed")
-        inbox.set_state(message_id, "failed")
-    except Exception:
-        inbox.set_state(message_id, "uncertain")
+    inbox.set_state(message_id, "failed")
+    _note(inbox, sender, "certificate_rejected" if isinstance(exc, CertificateRejected) else "processing_failed", filename)
 
 
 def _proceed(inbox: Inbox, client, signers, runtime: Runtime, job: Job, document: bytes, planned) -> None:
     """Sign for the chosen signers, asking their owners first where that is required."""
     waiting = [signer.config.owner for signer, _ in planned if signer.config.needs_confirmation(job.sender)]
-    busy = next((owner for owner in waiting if inbox.pending_for_owner(owner)), None)
-    if busy is not None:
-        # An owner answers with a plain 1 or 0, so only one question may be open for them at a time.
-        inbox.set_state(job.message_id, "review_sending")
-        runtime.say(client, job.sender, "owner_busy", owner=runtime.called(busy))
+    full = next((owner for owner in waiting if inbox.requests_waiting_for(owner) >= runtime.queue_limit), None)
+    if full is not None:
         inbox.set_state(job.message_id, "needs_review")
+        _note(inbox, job.sender, "queue_full", job.filename, owner=runtime.called(full))
         return
     if waiting:
         _await_confirmations(inbox, client, signers, runtime, job, document, planned)
@@ -452,47 +580,46 @@ def _proceed(inbox: Inbox, client, signers, runtime: Runtime, job: Job, document
     inbox.set_state(job.message_id, "sending")
     client.send_pdf(job.sender, signed, job.filename)
     inbox.set_state(job.message_id, "sent")
-    runtime.mention(client, job.sender, "signed_by", signed=", ".join(signer.config.name for signer, _ in planned))
+    _note(inbox, job.sender, "signed_by", job.filename, signed=", ".join(signer.config.name for signer, _ in planned))
 
 
 def _offer_choice(inbox: Inbox, client, runtime: Runtime, job: Job, document: bytes, located, unplaced) -> None:
-    """Keep the document and ask the requester who should sign, or whether to ask an owner.
+    """Keep the document and put in line the question of who should sign, or whether to ask an owner.
 
-    Nothing reaches a certificate owner until the requester has answered.
+    Nothing reaches a certificate owner until the requester has answered. The
+    question is asked when it is its turn, together with the ones that are alike.
     """
-    for stale in {entry.request_id for entry in inbox.offers_for(job.sender)}:
-        record = inbox.get_request(stale)
-        _discard(inbox, runtime, stale)
-        if record is not None:
-            inbox.set_state(record.message_id, "needs_review")
     request_id = uuid4().hex[:12]
-    expires_at = time.time() + runtime.confirmation_minutes * 60
     entries = [PendingSignature(request_id, signer.config.id, position.page, tuple(position.box), getattr(position, "field_name", None),
-                                "offered", signer.config.owner, expires_at) for signer, position in located]
+                                "offered", signer.config.owner, None) for signer, position in located]
+    language = runtime.language(job.sender)
+    if len(located) == 1 and not unplaced:
+        question = text(language, "ask_owner", name=located[0][0].config.name, minutes=runtime.confirmation_minutes,
+                        owner=runtime.called(located[0][0].config.owner))
+    else:
+        note = " (" + text(language, "needs_approval") + ")"
+        options = "\n".join(f"{index} - {signer.config.name}{note if signer.config.needs_confirmation(job.sender) else ''}"
+                            for index, (signer, _) in enumerate(located, start=1))
+        question = text(language, "choose", minutes=runtime.confirmation_minutes, all=len(located) + 1, options=options)
+    if unplaced:
+        question += "\n" + text(language, "choose_unplaced", names=", ".join(signer.config.name for signer in unplaced))
     _write_pending(runtime.pending_file(request_id), document)
-    inbox.create_request(SigningRequestRecord(request_id, job.message_id, job.sender, job.filename, _digest(document), len(document)), entries)
-    try:
-        language = runtime.language(job.sender)
-        if len(located) == 1 and not unplaced:
-            question = text(language, "ask_owner", name=located[0][0].config.name, minutes=runtime.confirmation_minutes,
-                            owner=runtime.called(located[0][0].config.owner))
-        else:
-            note = " (" + text(language, "needs_approval") + ")"
-            options = "\n".join(f"{index} - {signer.config.name}{note if signer.config.needs_confirmation(job.sender) else ''}"
-                                for index, (signer, _) in enumerate(located, start=1))
-            question = text(language, "choose", minutes=runtime.confirmation_minutes, all=len(located) + 1, options=options)
-        if unplaced:
-            question += "\n" + text(language, "choose_unplaced", names=", ".join(signer.config.name for signer in unplaced))
-        inbox.set_state(job.message_id, "review_sending")
-        client.send_text(job.sender, question)
-        inbox.set_state(job.message_id, "awaiting_choice")
-    except Exception:
-        _discard(inbox, runtime, request_id)
-        raise
+    inbox.create_request(SigningRequestRecord(request_id, job.message_id, job.sender, job.filename, _digest(document), len(document),
+                                              question), entries)
+    inbox.set_state(job.message_id, "awaiting_choice")
 
 
-def _choose(inbox: Inbox, client, signers, runtime: Runtime, sender: str, request_id: str, answer: str) -> None:
-    """Act on the requester's reply to "who should sign?" or "ask the owner?"."""
+def _choose(inbox: Inbox, client, signers, runtime: Runtime, sender: str, requests: list[str], answer: str) -> None:
+    """Act on the requester's reply to "who should sign?" or "ask the owner?", for every document that was asked."""
+    options = len([entry for entry in inbox.request_signatures(requests[0]) if entry.status == "offered"])
+    if answer != "0" and not (answer == "all" or 1 <= int(answer) <= options + 1):
+        runtime.say(client, sender, "answer_invalid")
+        return
+    for request_id in requests:
+        _choose_one(inbox, client, signers, runtime, sender, request_id, answer)
+
+
+def _choose_one(inbox: Inbox, client, signers, runtime: Runtime, sender: str, request_id: str, answer: str) -> None:
     record = inbox.get_request(request_id)
     entries = [entry for entry in inbox.request_signatures(request_id) if entry.status == "offered"]
     if record is None or not entries:
@@ -500,12 +627,9 @@ def _choose(inbox: Inbox, client, signers, runtime: Runtime, sender: str, reques
     if answer == "0":
         _discard(inbox, runtime, request_id)
         inbox.set_state(record.message_id, "needs_review")
-        runtime.say(client, sender, "choice_cancelled")
+        _note(inbox, sender, "choice_cancelled", record.filename)
         return
     number = len(entries) + 1 if answer == "all" else int(answer)
-    if not 1 <= number <= len(entries) + 1:
-        runtime.say(client, sender, "answer_invalid")
-        return
     chosen = entries if number > len(entries) else [entries[number - 1]]
     job = Job(record.message_id, "", record.filename, sender)
     try:
@@ -519,7 +643,7 @@ def _choose(inbox: Inbox, client, signers, runtime: Runtime, sender: str, reques
         _proceed(inbox, client, signers, runtime, job, document, planned)
     except Exception as exc:
         _discard(inbox, runtime, request_id)
-        _report_failure(inbox, client, runtime, record.message_id, sender, exc)
+        _report_failure(inbox, record.message_id, sender, record.filename, exc)
 
 
 def process_one(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], contextual_review=None, general_suggest=None,
@@ -528,11 +652,19 @@ def process_one(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], conte
     runtime = runtime or Runtime(inbox.path.parent)
     expire_requests(inbox, client, signers, runtime)
     job = inbox.claim()
-    if job is None:
-        return False
+    if job is not None:
+        _handle(inbox, client, signers, contextual_review, general_suggest, runtime, job)
+    # Outcomes first, so the last thing a person reads is the question that waits for an answer.
+    tell_outcomes(inbox, client, runtime)
+    ask_questions(inbox, client, signers, runtime)
+    tell_outcomes(inbox, client, runtime)
+    return job is not None
+
+
+def _handle(inbox: Inbox, client, signers, contextual_review, general_suggest, runtime: Runtime, job: Job) -> None:
     if job.kind == "document":
         _handle_document(inbox, client, signers, contextual_review, general_suggest, runtime, job)
-        return True
+        return
     try:
         if job.kind == "refused":
             runtime.say(client, job.sender, "refused_secret")
@@ -541,4 +673,3 @@ def process_one(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], conte
             _handle_command(inbox, client, signers, runtime, job)
     except Exception:
         inbox.set_state(job.message_id, "uncertain")
-    return True

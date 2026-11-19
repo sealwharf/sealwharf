@@ -11,3 +11,9 @@ def quiet_courtesy_messages(request, monkeypatch):
     """
     if request.module.__name__ != "test_flow":
         monkeypatch.setattr(Runtime, "mention", lambda *args, **kwargs: None)
+
+
+@pytest.fixture(autouse=True)
+def questions_are_asked_at_once(monkeypatch):
+    """Do not wait for more documents before asking; the tests that cover the wait set it themselves."""
+    monkeypatch.setattr("sealwharf.application.worker.SETTLE_SECONDS", 0)

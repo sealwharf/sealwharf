@@ -22,7 +22,7 @@ from sealwharf.adapters.audit import AuditLog
 from sealwharf.adapters.inbox import Inbox, Job, accepted_events, parse_command
 from sealwharf.adapters.whapi import Whapi, signed_filename
 from sealwharf.application.signers import unlock_signers, warn_expiring
-from sealwharf.application.worker import Runtime, expire_requests, process_one
+from sealwharf.application.worker import Runtime, ask_questions, expire_requests, process_one, tell_outcomes
 from sealwharf.authorization import canonical_number, format_number
 from sealwharf.documents.verification import describe, verify_signatures
 from sealwharf.messages import LANGUAGES, MESSAGES
@@ -105,7 +105,7 @@ def world(tmp_path):
                                     autotrust=frozenset(autotrust), password="pw-" + alias))
     signers = unlock_signers(tuple(configs))
     inbox = Inbox(tmp_path / "data" / "inbox.db")
-    runtime = Runtime(tmp_path / "data", requests_per_hour=20, confirmation_minutes=5, names=dict(PEOPLE))
+    runtime = Runtime(tmp_path / "data", requests_per_hour=20, confirmation_minutes=5, names=dict(PEOPLE), settle_seconds=0)
     chat = Chat()
     counter = iter(range(1, 1000))
 
@@ -119,7 +119,7 @@ def world(tmp_path):
         assert process_one(inbox, chat, signers, runtime=runtime)
         message = f"m{number}"
         # Most tests are about what happens after the requester agrees to involve the owner.
-        if text is None and consent and state(message) == "awaiting_choice" and chat.to(sender)[-1].startswith("To sign as"):
+        if text is None and consent and state(message) == "awaiting_choice" and "To sign as" in chat.to(sender)[-1]:
             send(sender, text="1")
         return message
 
@@ -139,7 +139,23 @@ def signer_names(pdf):
 
 
 def later(world, minutes):
-    expire_requests(world.inbox, world.chat, world.signers, world.runtime, now=time.time() + minutes * 60)
+    moment = time.time() + minutes * 60
+    expire_requests(world.inbox, world.chat, world.signers, world.runtime, now=moment)
+    ask_questions(world.inbox, world.chat, world.signers, world.runtime, now=moment)
+    tell_outcomes(world.inbox, world.chat, world.runtime)
+
+
+def burst(world, sender, documents, runtime=None):
+    """Several documents that arrive together, before the bot reads any of them."""
+    messages = []
+    for filename, document in documents:
+        message = f"b{len(world.chat.documents)}"
+        world.chat.documents[message] = document
+        world.inbox.add([Job(message, message, filename, sender)])
+        messages.append(message)
+    while process_one(world.inbox, world.chat, world.signers, runtime=runtime or world.runtime):
+        pass
+    return messages
 
 
 # Who may use the bot, and with which certificate.
@@ -158,7 +174,7 @@ def test_owner_signs_own_document_directly_and_it_is_audited(world):
     document = make_pdf("Alice Example")
     message = world.send(OWNER_A, document)
     assert world.state(message) == "sent" and world.chat.texts == []
-    assert [text for _, text in world.chat.notes] == ["Got it! Working on your document...", "All set! Signed by: Alice Example."]
+    assert [text for _, text in world.chat.notes] == ["Got it! Working on it...", "All set! Signed by: Alice Example."]
     recipient, signed, _ = world.chat.files[0]
     assert recipient == OWNER_A and signer_names(signed) == ["Alice Example"]
     entry = world.audit.entries()[0]
@@ -216,8 +232,8 @@ def test_requester_agrees_then_the_owner_approves_with_a_single_digit(world):
     question = world.chat.to(PREPARER)[-1]
     # Nothing reaches the owner until the requester says so.
     assert world.state(message) == "awaiting_choice" and world.chat.to(OWNER_A) == [] and not world.chat.forwarded
-    assert question.startswith("To sign as Alice Example, I need the approval of Ana.")
-    assert "1 - Send the document to Ana and ask for approval\n0 - Cancel" in question
+    assert question.startswith("About contract.pdf:\nTo sign as Alice Example, I need the approval of Ana.")
+    assert "1 - Send to Ana and ask for approval\n0 - Cancel" in question
     world.send(PREPARER, text="1")
     # The owner reads who is asking, with name and number, and then receives the unsigned document.
     request = world.chat.to(OWNER_A)[0]
@@ -281,27 +297,59 @@ def test_approval_covers_only_the_document_that_was_sent(world):
     assert "Nothing was signed" in world.chat.to(OWNER_A)[-1]
 
 
-def test_owner_has_one_open_request_at_a_time(world):
-    first = world.send(PREPARER, make_pdf("Alice Example"), filename="first.pdf")
-    second = world.send(PREPARER, make_pdf("Alice Example"), filename="second.pdf")
-    # A plain 1 must never be able to approve the wrong document, so the second request is turned away.
-    assert world.state(second) == "needs_review" and "Ana still has another request waiting" in world.chat.to(PREPARER)[-1]
-    assert len(world.chat.forwarded) == 1
-    world.send(OWNER_A, text="1")
-    assert world.state(first) == "sent" and world.chat.files[0][2] == "first.pdf"
-    third = world.send(PREPARER, make_pdf("Alice Example"), filename="third.pdf")
-    assert world.state(third) == "awaiting_confirmation"
+def test_requests_for_a_busy_owner_wait_in_line_and_are_asked_one_at_a_time(world):
+    # Carla is asked about the preparer's document; meanwhile Alice's owner asks for Carla's signature too.
+    first = world.send(PREPARER, make_pdf("Carla Example"), filename="first.pdf")
+    second = world.send(OWNER_A, make_pdf("Carla Example", "extra"), filename="second.pdf")
+    # A plain 1 must never be able to approve the wrong document: Carla has seen only the first.
+    assert [name for _, _, name in world.chat.forwarded] == ["first.pdf"] and len(world.chat.to(OWNER_C)) == 1
+    assert world.state(second) == "awaiting_confirmation"
+    assert world.chat.to(OWNER_A)[-1].startswith("Your document is in line for the approval of Carla, with 1 request(s) ahead")
+    world.send(OWNER_C, text="1")
+    assert world.state(first) == "sent" and world.chat.files[0][0] == PREPARER and world.chat.files[0][2] == "first.pdf"
+    # Her answer released the next question, which waits for an answer of its own.
+    assert [name for _, _, name in world.chat.forwarded] == ["first.pdf", "second.pdf"]
+    assert world.state(second) == "awaiting_confirmation" and len(world.chat.files) == 1
+    world.send(OWNER_C, text="0")
+    assert world.state(second) == "needs_review" and len(world.chat.files) == 1
+    assert "was not signed" in world.chat.to(OWNER_A)[-1]
+    assert [entry["certificate_id"] for entry in world.audit.entries()] == ["carla"]
 
 
-def test_a_short_reply_answers_the_newest_open_question(world):
-    # Alice's owner is asked to approve one document and, later, who should sign another.
+def test_time_to_answer_starts_only_when_the_question_is_asked(world):
+    world.send(PREPARER, make_pdf("Carla Example"), filename="first.pdf")
+    second = world.send(OWNER_A, make_pdf("Carla Example", "extra"), filename="second.pdf")
+    # The first request expires unanswered; the second is asked then, with its full time to be answered.
+    later(world, 6)
+    assert [name for _, _, name in world.chat.forwarded] == ["first.pdf", "second.pdf"]
+    assert world.state(second) == "awaiting_confirmation"
+    entry = world.inbox.pending_for_owner(OWNER_C)[0]
+    assert entry.expires_at > time.time() + 10 * 60
+
+
+def test_the_line_for_an_owner_has_a_limit(world):
+    short = Runtime(world.runtime.data_dir, names=dict(PEOPLE), queue_limit=1)
+    burst(world, PREPARER, [("first.pdf", make_pdf("Carla Example"))], short)
+    world.inbox.add([Job("yes", "", None, PREPARER, "text", "answer 1")])
+    assert process_one(world.inbox, world.chat, world.signers, runtime=short)
+    refused = burst(world, OWNER_A, [("second.pdf", make_pdf("Carla Example", "extra"))], short)
+    world.inbox.add([Job("yes2", "", None, OWNER_A, "text", "answer 1")])
+    assert process_one(world.inbox, world.chat, world.signers, runtime=short)
+    assert world.state(refused[0]) == "needs_review" and len(world.chat.forwarded) == 1
+    assert "already has many requests waiting for approval" in world.chat.to(OWNER_A)[-1]
+
+
+def test_a_person_has_one_open_question_and_the_next_waits_its_turn(world):
+    # Alice's owner is asked to approve one document and then sends another that needs her own choice.
     approval = world.send(PREPARER, make_pdf("Alice Example"))
     choice = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
-    world.send(OWNER_A, text="2")
-    assert world.state(choice) == "sent" and signer_names(world.chat.files[0][1]) == ["Bruno Example"]
-    # With the choice settled, the next reply goes to the approval request.
+    assert world.state(choice) == "awaiting_choice" and not any("Who should sign?" in text for text in world.chat.to(OWNER_A))
+    # Her reply answers the approval, the only question she was asked; the choice is asked right after.
     world.send(OWNER_A, text="1")
-    assert world.state(approval) == "sent" and world.chat.files[1][0] == PREPARER
+    assert world.state(approval) == "sent" and world.chat.files[0][0] == PREPARER
+    assert "Who should sign?" in world.chat.to(OWNER_A)[-1] and world.state(choice) == "awaiting_choice"
+    world.send(OWNER_A, text="2")
+    assert world.state(choice) == "sent" and signer_names(world.chat.files[1][1]) == ["Bruno Example"]
 
 
 def test_people_without_a_contact_name_are_shown_by_number(world):
@@ -394,12 +442,137 @@ def test_choice_can_be_cancelled_expires_and_only_the_requester_may_answer(world
     assert not list((world.tmp_path / "data" / "pending").glob("*.pdf"))
 
 
-def test_a_newer_document_replaces_an_unanswered_choice(world):
-    first = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
+def test_a_newer_document_waits_behind_an_unanswered_choice(world):
+    first = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"), filename="older.pdf")
     second = world.send(OWNER_A, make_pdf("Alice Example", "Carla Example"), filename="newer.pdf")
-    assert (world.state(first), world.state(second)) == ("needs_review", "awaiting_choice")
+    # Nothing is dropped: the newer document keeps its place and its question is not asked yet.
+    assert (world.state(first), world.state(second)) == ("awaiting_choice", "awaiting_choice")
+    questions = [text for text in world.chat.to(OWNER_A) if "Who should sign?" in text]
+    assert len(questions) == 1 and questions[0].startswith("About older.pdf:")
+    world.send(OWNER_A, text="2")
+    assert world.chat.files[0][2] == "older.pdf" and signer_names(world.chat.files[0][1]) == ["Bruno Example"]
+    assert world.chat.to(OWNER_A)[-1].startswith("About newer.pdf:") and world.state(second) == "awaiting_choice"
     world.send(OWNER_A, text="1")
-    assert world.chat.files[0][2] == "newer.pdf" and signer_names(world.chat.files[0][1]) == ["Alice Example"]
+    assert world.chat.files[1][2] == "newer.pdf" and signer_names(world.chat.files[1][1]) == ["Alice Example"]
+
+
+# Documents sent in bulk.
+
+def test_documents_sent_together_by_their_owner_get_one_note_and_one_summary(world):
+    messages = burst(world, OWNER_A, [("a.pdf", make_pdf("Alice Example")), ("b.pdf", make_pdf("Alice Example", "more")),
+                                      ("c.pdf", make_pdf("Nobody Known"))])
+    assert [world.state(message) for message in messages] == ["sent", "sent", "needs_review"]
+    assert [name for _, _, name in world.chat.files] == ["a.pdf", "b.pdf"]
+    assert [text for _, text in world.chat.notes] == ["Got it! Working on it..."]
+    assert world.chat.to(OWNER_A) == ["Here is what happened with your documents:\n- Signed: a.pdf, b.pdf\n"
+                                      "- NOT signed, no clear place to sign: c.pdf"]
+
+
+def test_documents_sent_together_are_asked_and_approved_as_one(world):
+    documents = [(f"{name}.pdf", make_pdf("Alice Example", name)) for name in ("a", "b", "c")]
+    messages = burst(world, PREPARER, documents)
+    # One question for the three documents, and nothing reaches the owner before the answer.
+    questions = world.chat.to(PREPARER)
+    assert len(questions) == 1 and questions[0].startswith("About 3 documents (a.pdf, b.pdf, c.pdf):\nTo sign as Alice Example")
+    assert not world.chat.forwarded and world.chat.to(OWNER_A) == []
+    world.send(PREPARER, text="1")
+    # The owner is asked once, with every document to look at.
+    assert world.chat.to(OWNER_A) == [
+        "Hello! Paulo Preparer (+55 11 90000-0010) asks you to sign the following 3 documents with your digital certificate: "
+        "a.pdf, b.pdf, c.pdf. Reply 1 to approve all of them. Reply 0, or simply ignore this message, to refuse all of them."]
+    assert [(recipient, name) for recipient, _, name in world.chat.forwarded] == [(OWNER_A, "a.pdf"), (OWNER_A, "b.pdf"), (OWNER_A, "c.pdf")]
+    assert world.chat.to(PREPARER)[-1] == ("Here is what happened with your documents:\n"
+                                           "- Sent to Ana for approval: a.pdf, b.pdf, c.pdf")
+    assert not world.chat.files and world.audit.entries() == []
+    world.send(OWNER_A, text="1")
+    assert [world.state(message) for message in messages] == ["sent"] * 3
+    assert [(recipient, name) for recipient, _, name in world.chat.files] == [(PREPARER, "a.pdf"), (PREPARER, "b.pdf"), (PREPARER, "c.pdf")]
+    # Each approval still covers exactly one document, and each signature is recorded.
+    entries = world.audit.entries()
+    assert [entry["approval"] for entry in entries] == ["confirmed"] * 3 and len({entry["document_sha256"] for entry in entries}) == 3
+    assert world.chat.to(OWNER_A)[-1] == "Here is what happened with your documents:\n- Approved and signed: a.pdf, b.pdf, c.pdf"
+    assert world.chat.to(PREPARER)[-1] == "Here is what happened with your documents:\n- Signed: a.pdf, b.pdf, c.pdf"
+
+
+def test_refusing_a_batch_refuses_every_document_in_it(world):
+    messages = burst(world, PREPARER, [("a.pdf", make_pdf("Alice Example", "a")), ("b.pdf", make_pdf("Alice Example", "b"))])
+    world.send(PREPARER, text="1")
+    world.send(OWNER_A, text="0")
+    assert [world.state(message) for message in messages] == ["needs_review"] * 2
+    assert not world.chat.files and world.audit.entries() == []
+    assert world.chat.to(OWNER_A)[-1] == "Here is what happened with your documents:\n- Refused: a.pdf, b.pdf"
+    assert "NOT signed (not approved in time, refused or failed): a.pdf, b.pdf" in world.chat.to(PREPARER)[-1]
+    assert not list((world.tmp_path / "data" / "pending").glob("*.pdf"))
+
+
+def test_a_changed_document_in_a_batch_is_not_signed_while_the_others_are(world):
+    burst(world, PREPARER, [("a.pdf", make_pdf("Alice Example", "a")), ("b.pdf", make_pdf("Alice Example", "b"))])
+    world.send(PREPARER, text="1")
+    tampered = world.inbox.pending_for_owner(OWNER_A)[0]
+    world.runtime.pending_file(tampered.request_id).write_bytes(make_pdf("Alice Example", "Bruno Example"))
+    world.send(OWNER_A, text="1")
+    assert [name for _, _, name in world.chat.files] == ["b.pdf"] and len(world.audit.entries()) == 1
+    assert "- NOT signed, signing failed: a.pdf" in world.chat.to(OWNER_A)[-1]
+    assert "- Approved and signed: b.pdf" in world.chat.to(OWNER_A)[-1]
+
+
+def test_documents_with_different_questions_are_asked_separately(world):
+    burst(world, OWNER_A, [("two.pdf", make_pdf("Alice Example", "Bruno Example")), ("other.pdf", make_pdf("Alice Example", "Carla Example")),
+                           ("same.pdf", make_pdf("Alice Example", "Bruno Example", "again"))])
+    # The two documents with the same signers share a question; the other one waits for its own.
+    questions = [text for text in world.chat.to(OWNER_A) if "Who should sign?" in text]
+    assert len(questions) == 1 and questions[0].startswith("About 2 documents (two.pdf, same.pdf):")
+    world.send(OWNER_A, text="2")
+    assert [(name, signer_names(data)) for _, data, name in world.chat.files] == [("two.pdf", ["Bruno Example"]), ("same.pdf", ["Bruno Example"])]
+    assert world.chat.to(OWNER_A)[-1].startswith("About other.pdf:")
+
+
+def test_the_same_file_sent_twice_is_asked_about_once(world):
+    document = make_pdf("Alice Example")
+    messages = burst(world, PREPARER, [("a.pdf", document), ("a.pdf", document)])
+    assert [world.state(message) for message in messages] == ["awaiting_choice", "duplicate"]
+    texts = world.chat.to(PREPARER)
+    assert any(text.startswith("About a.pdf:") for text in texts)
+    assert any(text == "You had already sent this same file, so I am handling it only once." for text in texts)
+    world.send(PREPARER, text="1")
+    assert len(world.chat.forwarded) == 1
+    # Once it is settled, the same file may be sent again.
+    world.send(OWNER_A, text="0")
+    again = world.send(PREPARER, document, filename="a.pdf", consent=False)
+    assert world.state(again) == "awaiting_choice"
+
+
+def test_a_question_waits_for_documents_that_are_still_arriving(world):
+    patient = Runtime(world.runtime.data_dir, names=dict(PEOPLE), settle_seconds=30)
+    messages = burst(world, PREPARER, [("a.pdf", make_pdf("Alice Example"))], patient)
+    assert world.state(messages[0]) == "awaiting_choice" and world.chat.to(PREPARER) == []
+    more = burst(world, PREPARER, [("b.pdf", make_pdf("Alice Example", "b"))], patient)
+    assert world.state(more[0]) == "awaiting_choice" and world.chat.to(PREPARER) == []
+    # Once the requester stops sending, one question covers what arrived.
+    ask_questions(world.inbox, world.chat, world.signers, world.runtime)
+    assert world.chat.to(PREPARER)[-1].startswith("About 2 documents (a.pdf, b.pdf):")
+
+
+def test_a_question_that_cannot_be_delivered_closes_the_request(world):
+    message = world.send(PREPARER, make_pdf("Alice Example"), consent=False)
+    deliver = world.chat.send_pdf
+
+    def unreachable(recipient, data, filename=None, *, signed=True):
+        if not signed:
+            raise TimeoutError()
+        deliver(recipient, data, filename, signed=signed)
+    world.chat.send_pdf = unreachable
+    world.send(PREPARER, text="1")
+    assert world.state(message) == "needs_review" and not world.chat.files and world.audit.entries() == []
+    assert "was not signed" in world.chat.to(PREPARER)[-1]
+    assert not list((world.tmp_path / "data" / "pending").glob("*.pdf"))
+
+
+def test_a_contact_may_have_an_hourly_limit_of_its_own(world):
+    bulk = Runtime(world.runtime.data_dir, requests_per_hour=1, limits={OWNER_A: 3})
+    messages = burst(world, OWNER_A, [(f"{index}.pdf", make_pdf("Alice Example", str(index))) for index in range(4)], bulk)
+    assert [world.state(message) for message in messages] == ["sent", "sent", "sent", "rate_limited"]
+    assert bulk.limit(OWNER_B) == 1
 
 
 def test_signer_without_a_clear_place_is_reported_and_never_offered(world):
@@ -485,7 +658,7 @@ def test_requests_are_limited_per_number(world):
     for _ in range(3):
         assert process_one(world.inbox, world.chat, world.signers, runtime=limited)
     assert len(world.chat.files) == 2 and world.state("limit2") == "rate_limited"
-    assert "many documents in the last hour" in world.chat.to(OWNER_A)[-1]
+    assert "- NOT signed, over the hourly limit: report.pdf" in world.chat.to(OWNER_A)[-1]
 
 
 def test_owner_is_warned_once_a_day_thirty_days_before_expiry(tmp_path):
@@ -523,8 +696,8 @@ def test_each_person_is_answered_in_their_own_language(world):
     world.chat.documents["lang"] = make_pdf("Alice Example")
     world.inbox.add([Job("lang1", "lang", "relatorio.pdf", PREPARER)])
     assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
-    assert world.chat.notes[0] == (PREPARER, "Recebido! Estou processando o seu documento...")
-    assert world.chat.to(PREPARER)[0].startswith("Para assinar como Alice Example, preciso da aprovação de Ana.")
+    assert world.chat.notes[0] == (PREPARER, "Recebido! Estou processando...")
+    assert world.chat.to(PREPARER)[0].startswith("Sobre relatorio.pdf:\nPara assinar como Alice Example, preciso da aprovação de Ana.")
     world.inbox.add([Job("lang2", "", None, PREPARER, "text", "answer 1")])
     assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
     assert world.chat.to(OWNER_A)[0] == ("Olá! Recebemos um pedido de Paulo Preparer (+55 11 90000-0010) para assinar o documento "
@@ -688,3 +861,17 @@ def test_a_single_name_may_be_written_without_a_list(config_file):
     signer = load_config(config_file).signers[0]
     assert signer.needs_confirmation("5511900000010") and not signer.needs_confirmation("5511900000011")
     assert signer.names == ("John Doe", "Johnny Doe")
+
+
+def test_a_contact_limit_is_read_from_the_configuration(tmp_path):
+    from sealwharf.signer_config import load_config
+    (tmp_path / "certificate.p12").write_bytes(b"synthetic")
+    config = tmp_path / "sealwharf.yaml"
+    body = ('contacts:\n  jane:\n    number: "5511999999999"\n    limit: {limit}\n  john:\n    number: "5511988888888"\n'
+            'certificates:\n  - id: one\n    name: Jane Example\n    file: certificate.p12\n    password: "synthetic"\n    owner: jane\n')
+    config.write_text(body.format(limit=300), encoding="utf-8")
+    assert load_config(config).request_limits == {"5511999999999": 300}
+    for wrong in ("0", "many", "true", "9000"):
+        config.write_text(body.format(limit=wrong), encoding="utf-8")
+        with pytest.raises(ValueError, match="limit of contact jane"):
+            load_config(config)

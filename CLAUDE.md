@@ -59,8 +59,13 @@ docker build -t sealwharf:local .
   cover the ambiguous case with a test.
 - A certificate is used without the owner's approval only for its owner or a
   trusted contact. An approval covers the exact document that was sent, comes
-  from the owner's number, is single-use and expires. The owner answers with a
-  plain 1 or 0, so an owner never has two requests open at once.
+  from the owner's number, is single-use and expires. People answer with a
+  plain 1 or 0, so a person never has two questions open at once: further
+  questions wait in line (`ask_questions` in `worker.py`). One question may
+  cover several documents only when it is the same question, and each
+  document is still checked against its own hash before it is signed.
+- A waiting question is never dropped in silence: it is asked, expires after
+  being asked, or its requester is told why it was closed.
 - Secrets live only in `config/sealwharf.yaml` and never appear in logs, error
   messages, backups or `repr` output. Operational logs carry no phone numbers,
   names, file names or document content.
