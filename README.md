@@ -154,6 +154,12 @@ The bot speaks English (`en`), Brazilian Portuguese (`pt-br`) and Spanish (`es`)
 
 When the owner replies `1`, the document is signed and sent back to you.
 
+**When a signature cannot be made.** If the certificate of one of the signers is expired, revoked or cannot be validated, or its USB token is not connected, the bot does not sign and tells you whose signature had the problem:
+
+> Sorry, I could not sign this document: the certificate of John Doe is expired, revoked or could not be validated. Nothing was signed.
+
+If the others had already signed, you receive the document with their signatures and a note saying which one is missing and why.
+
 ### Sending many documents at once
 
 Select all the files and send them together. The bot waits about five seconds after your last file, so that everything you sent together is handled as one batch:

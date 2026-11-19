@@ -33,7 +33,10 @@ from ..documents.position import find_signature_position, has_signature_widgets
 from ..documents.signing import (
     CertificateRejected,
     SignaturePosition,
+    SigningError,
     SigningRequest,
+    TokenPinRejected,
+    TokenUnavailable,
     TrustSettings,
     sign_pdf,
     sign_pdf_sequence,
@@ -101,6 +104,14 @@ def _note(inbox: Inbox, recipient: str, key: str, filename: str | None = None, *
     inbox.add_note(recipient, key, filename, values)
 
 
+def _told(language: str, key: str, values: dict) -> str:
+    """Write one outcome; a signature that could not be made is described in the reader's language."""
+    if "problem" in values:
+        values = {name: value for name, value in values.items() if name != "name"} | {
+            "problem": text(language, "problem_" + values["problem"], name=values["name"])}
+    return text(language, key, **values)
+
+
 def tell_outcomes(inbox: Inbox, client, runtime: Runtime) -> None:
     """Tell each person what happened, once all the documents they sent have been read.
 
@@ -112,11 +123,11 @@ def tell_outcomes(inbox: Inbox, client, runtime: Runtime) -> None:
         notes = inbox.take_notes(recipient)
         language = runtime.language(recipient)
         if len(notes) == 1:
-            message = text(language, notes[0][0], **notes[0][2])
+            message = _told(language, notes[0][0], notes[0][2])
         else:
             groups: dict[str, list[str]] = {}
             for key, filename, values in notes:
-                groups.setdefault(text(language, "sum_" + key, **values), []).append(_file(runtime, recipient, filename))
+                groups.setdefault(_told(language, "sum_" + key, values), []).append(_file(runtime, recipient, filename))
             message = "\n".join([text(language, "summary")] + [f"- {label}: {', '.join(files)}" for label, files in groups.items()])
         try:
             client.send_text(recipient, message)
@@ -233,6 +244,27 @@ def _sign_one(document: bytes, request: SigningRequest) -> bytes:
                     request.logo, request.logo_scale, request.expected_certificate, request.trust, request.token)
 
 
+class SignerFailed(Exception):
+    """One person's signature could not be made, so whoever asked can be told whose it was and why."""
+
+    def __init__(self, signer: UnlockedSigner, cause: Exception):
+        super().__init__("A signature could not be made.")
+        self.signer = signer
+        self.problem = ("certificate" if isinstance(cause, CertificateRejected)
+                        else "token" if isinstance(cause, TokenUnavailable | TokenPinRejected) else "signature")
+
+    @property
+    def values(self) -> dict[str, str]:
+        return {"problem": self.problem, "name": self.signer.config.name}
+
+
+def _sign_as(document: bytes, signer: UnlockedSigner, position) -> bytes:
+    try:
+        return _sign_one(document, _request(signer, position))
+    except Exception as exc:
+        raise SignerFailed(signer, exc) from exc
+
+
 def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -271,8 +303,12 @@ def _discard(inbox: Inbox, runtime: Runtime, request_id: str) -> None:
     runtime.pending_file(request_id).unlink(missing_ok=True)
 
 
-def _finish(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: Runtime, request_id: str) -> None:
-    """Report progress; once nobody is left to confirm, deliver the result."""
+def _finish(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: Runtime, request_id: str,
+            failure: "SignerFailed | None" = None) -> None:
+    """Report progress; once nobody is left to confirm, deliver the result.
+
+    A signature that has just failed is reported with the name of its signer and the reason.
+    """
     record = inbox.get_request(request_id)
     if record is None:
         return
@@ -290,13 +326,18 @@ def _finish(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: 
         inbox.set_state(record.message_id, "sending")
         client.send_pdf(requester, runtime.pending_file(request_id).read_bytes(), record.filename)
         inbox.set_state(record.message_id, "sent")
-        if missing:
+        if failure is not None:
+            _note(inbox, requester, "partial_problem", record.filename, signed=signed, **failure.values)
+        elif missing:
             _note(inbox, requester, "partial", record.filename, signed=signed, missing=missing)
         else:
             _note(inbox, requester, "signed_by", record.filename, signed=signed)
     else:
         inbox.set_state(record.message_id, "needs_review")
-        _note(inbox, requester, "not_signed", record.filename, missing=missing)
+        if failure is not None:
+            _note(inbox, requester, "signer_problem", record.filename, **failure.values)
+        else:
+            _note(inbox, requester, "not_signed", record.filename, missing=missing)
     _discard(inbox, runtime, request_id)
 
 
@@ -457,6 +498,7 @@ def _approve_one(inbox: Inbox, client, signers, runtime: Runtime, owner: str, re
         _finish(inbox, client, signers, runtime, request_id)
         return
     path = runtime.pending_file(request_id)
+    failure = None
     try:
         current = path.read_bytes()
         # The approval covers exactly the document the owner was sent.
@@ -464,20 +506,21 @@ def _approve_one(inbox: Inbox, client, signers, runtime: Runtime, owner: str, re
             raise ValueError("The pending document does not match the one that was sent for approval.")
         steps = []
         for entry in entries:
-            signed = _sign_one(current, _request(by_id[entry.signer_id], SignaturePosition(entry.page, entry.box, entry.field_name)))
+            signed = _sign_as(current, by_id[entry.signer_id], SignaturePosition(entry.page, entry.box, entry.field_name))
             steps.append((by_id[entry.signer_id], current, signed))
             current = signed
         _write_pending(path, current)
     except Exception as exc:
         for entry in entries:
             inbox.set_signature_status(request_id, entry.signer_id, "failed")
-        _note(inbox, owner, "approval_rejected" if isinstance(exc, CertificateRejected) else "approval_failed", record.filename)
+        failure = exc if isinstance(exc, SignerFailed) else None
+        _note(inbox, owner, "approval_rejected" if failure and failure.problem == "certificate" else "approval_failed", record.filename)
     else:
         for signer, before, after in steps:
             inbox.set_signature_status(request_id, signer.config.id, "signed")
             _audit(runtime, signer, request_id=request_id, requester=record.requester, confirmed_by=owner, before=before, after=after)
         _note(inbox, owner, "approved", record.filename)
-    _finish(inbox, client, signers, runtime, request_id)
+    _finish(inbox, client, signers, runtime, request_id, failure)
 
 
 # Chat events.
@@ -560,7 +603,10 @@ def _report_failure(inbox: Inbox, message_id: str, sender: str, filename: str | 
         inbox.set_state(message_id, "uncertain")
         return
     inbox.set_state(message_id, "failed")
-    _note(inbox, sender, "certificate_rejected" if isinstance(exc, CertificateRejected) else "processing_failed", filename)
+    if isinstance(exc, SignerFailed):
+        _note(inbox, sender, "signer_problem", filename, **exc.values)
+    else:
+        _note(inbox, sender, "processing_failed", filename)
 
 
 def _proceed(inbox: Inbox, client, signers, runtime: Runtime, job: Job, document: bytes, planned) -> None:
@@ -574,8 +620,15 @@ def _proceed(inbox: Inbox, client, signers, runtime: Runtime, job: Job, document
     if waiting:
         _await_confirmations(inbox, client, signers, runtime, job, document, planned)
         return
-    requests = tuple(_request(signer, position) for signer, position in planned)
-    signed = _sign_one(document, requests[0]) if len(requests) == 1 else sign_pdf_sequence(document, requests)
+    if len(planned) == 1:
+        signed = _sign_as(document, *planned[0])
+    else:
+        try:
+            signed = sign_pdf_sequence(document, tuple(_request(signer, position) for signer, position in planned))
+        except SigningError as exc:
+            if exc.request_index is None:
+                raise
+            raise SignerFailed(planned[exc.request_index][0], exc) from exc
     for signer, _ in planned:
         _audit(runtime, signer, request_id=uuid4().hex[:12], requester=job.sender, confirmed_by=None, before=document, after=signed)
     # A disruption during sending leaves an uncertain state; do not retry automatically.

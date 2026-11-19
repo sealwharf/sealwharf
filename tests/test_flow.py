@@ -25,6 +25,7 @@ from sealwharf.adapters.whapi import Whapi, signed_filename
 from sealwharf.application.signers import status_report, unlock_signers, warn_expiring
 from sealwharf.application.worker import Runtime, ask_questions, expire_requests, process_one, tell_outcomes
 from sealwharf.authorization import canonical_number, format_number
+from sealwharf.documents.signing import CertificateRejected, TokenUnavailable
 from sealwharf.documents.verification import describe, verify_signatures
 from sealwharf.messages import CATALOGS, wake_reply
 from sealwharf.signer_config import SignerConfig, load_config
@@ -202,6 +203,56 @@ def test_trusted_preparer_signs_without_asking(world):
 def test_ambiguous_name_is_not_signed(world):
     message = world.send(OWNER_A, make_pdf("Alice Example", "Alice Example"))
     assert world.state(message) == "needs_review" and not world.chat.files and world.audit.entries() == []
+
+
+def test_a_signature_that_cannot_be_made_is_reported_with_the_name_of_its_signer(world, monkeypatch):
+    def refuse(error):
+        return lambda *args, **kwargs: (_ for _ in ()).throw(error)
+    # Signing with one's own certificate.
+    monkeypatch.setattr("sealwharf.application.worker.sign_pdf", refuse(CertificateRejected("The certificate is revoked.")))
+    message = world.send(OWNER_A, make_pdf("Alice Example"))
+    assert world.state(message) == "failed" and not world.chat.files and world.audit.entries() == []
+    assert world.chat.to(OWNER_A)[-1] == ("Sorry, I could not sign this document: the certificate of Alice Example is expired, "
+                                          "revoked or could not be validated. Nothing was signed.")
+    monkeypatch.setattr("sealwharf.application.worker.sign_pdf", refuse(TokenUnavailable("Could not reach the token.")))
+    world.send(OWNER_A, make_pdf("Alice Example", "second"))
+    assert world.chat.to(OWNER_A)[-1] == ("Sorry, I could not sign this document: the USB token of Alice Example could not be reached. "
+                                          "Nothing was signed.")
+    # After the owner approves: the requester learns whose signature failed, the owner that the certificate is theirs.
+    monkeypatch.setattr("sealwharf.application.worker.sign_pdf", refuse(CertificateRejected("The certificate is expired.")))
+    message = world.send(PREPARER, make_pdf("Alice Example", "third"))
+    world.send(OWNER_A, text="1")
+    assert world.state(message) == "needs_review" and not world.chat.files and world.audit.entries() == []
+    assert world.chat.to(OWNER_A)[-1] == "Sorry, your certificate is expired, revoked or could not be validated. Nothing was signed."
+    assert world.chat.to(PREPARER)[-1] == ("Sorry, I could not sign this document: the certificate of Alice Example is expired, "
+                                           "revoked or could not be validated. Nothing was signed.")
+    assert not list((world.tmp_path / "data" / "pending").glob("*.pdf"))
+
+
+def test_the_signer_that_failed_among_several_is_named_and_nothing_is_signed(world, monkeypatch):
+    import sealwharf.documents.signing as signing
+    real, calls = signing.sign_pdf, []
+
+    def second_fails(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise signing.SigningError("Cryptographic signature verification failed.")
+        return real(*args, **kwargs)
+    monkeypatch.setattr(signing, "sign_pdf", second_fails)
+    message = world.send(OWNER_A, make_pdf("Alice Example", "Bruno Example"))
+    world.send(OWNER_A, text="3")
+    assert world.state(message) == "failed" and not world.chat.files and world.audit.entries() == []
+    assert world.chat.to(OWNER_A)[-1] == ("Sorry, I could not sign this document: the signature of Bruno Example could not be made. "
+                                          "Nothing was signed.")
+    portuguese = Runtime(world.runtime.data_dir, languages={OWNER_A: "pt-br"}, names=dict(PEOPLE), settle_seconds=0)
+    calls.clear()
+    world.inbox.add([Job("pt1", "pt1", "a.pdf", OWNER_A, "document", None), Job("pt2", "pt2", "b.pdf", OWNER_A, "document", None)])
+    world.chat.documents.update(pt1=make_pdf("Bruno Example", "a"), pt2=make_pdf("Bruno Example", "b"))
+    monkeypatch.setattr("sealwharf.application.worker.sign_pdf", second_fails)
+    while process_one(world.inbox, world.chat, world.signers, runtime=portuguese):
+        pass
+    assert world.chat.to(OWNER_A)[-1] == ("Veja o que aconteceu com os seus documentos:\n- Assinado: a.pdf\n"
+                                          "- NÃO assinado, a assinatura de Bruno Example não pôde ser feita: b.pdf")
 
 
 def test_password_protected_pdf_is_refused(world):

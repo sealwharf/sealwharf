@@ -36,7 +36,7 @@ def test_each_language_is_complete(code):
     for key in catalog.messages:
         filled = text(code, key, **dict.fromkeys(
             ("fonts", "signed", "names", "minutes", "options", "all", "name", "owner", "file", "count", "files", "owners", "ahead",
-             "requester", "waiting", "missing", "certificate", "date", "days", "moment", "position", "kind"), "x"))
+             "requester", "waiting", "missing", "certificate", "date", "days", "moment", "position", "kind", "problem"), "x"))
         assert filled.strip() and "{" not in filled, key
 
 

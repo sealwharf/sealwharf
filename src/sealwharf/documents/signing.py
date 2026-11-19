@@ -33,6 +33,8 @@ from .position import _field_data
 
 class SigningError(Exception):
     """Signing or verification error without sensitive data."""
+    # In a sequence of signatures, which of the requests failed, when that is known.
+    request_index: int | None = None
 
 
 class CertificateRejected(SigningError):
@@ -64,6 +66,10 @@ class TokenSettings:
 
 class TokenPinRejected(SigningError):
     """The token refused the PIN. Trying again could lock the device."""
+
+
+class TokenUnavailable(SigningError):
+    """The token is not connected or could not be reached; no login was attempted."""
 
 
 def _single_token_slot(module: str) -> int:
@@ -120,7 +126,7 @@ def open_signer(certificate: Path | None, password: bytes, token: TokenSettings 
         # Vendor libraries expose several slots, so the occupied one is chosen before any login.
         slot = None if criteria else _single_token_slot(str(token.module))
     except Exception as exc:
-        raise SigningError("Could not find exactly one connected token. Connect it, or set its label.") from exc
+        raise TokenUnavailable("Could not find exactly one connected token. Connect it, or set its label.") from exc
     try:
         session = hanko_pkcs11.open_pkcs11_session(str(token.module), slot_no=slot, token_criteria=criteria,
                                                    user_pin=password.decode())
@@ -128,7 +134,7 @@ def open_signer(certificate: Path | None, password: bytes, token: TokenSettings 
             pkcs11_errors.PinExpired, pkcs11_errors.PinLocked) as exc:
         raise TokenPinRejected("The token refused the PIN.") from exc
     except Exception as exc:
-        raise SigningError("Could not reach the token. Check that it is connected.") from exc
+        raise TokenUnavailable("Could not reach the token. Check that it is connected.") from exc
     try:
         yield _token_signer(session, hanko_pkcs11, holder, fingerprint)
     finally:
@@ -206,9 +212,14 @@ def sign_pdf_sequence(document: bytes, requests: tuple[SigningRequest, ...]) -> 
         known = {signature.field_name for signature in PdfFileReader(BytesIO(document)).embedded_signatures}
         added = set()
         result = document
-        for request in requests:
-            result = sign_pdf(result, request.certificate, request.password, request.position,
-                              request.logo, request.logo_scale, request.expected_certificate, request.trust, request.token)
+        for index, request in enumerate(requests):
+            try:
+                result = sign_pdf(result, request.certificate, request.password, request.position,
+                                  request.logo, request.logo_scale, request.expected_certificate, request.trust, request.token)
+            except SigningError as exc:
+                # The caller tells people whose signature could not be made.
+                exc.request_index = index
+                raise
             signatures = PdfFileReader(BytesIO(result)).embedded_signatures
             names = {signature.field_name for signature in signatures}
             new = names - known
