@@ -4,7 +4,7 @@
 
 - Write all repository content in English, including source code, identifiers,
   filenames, comments, documentation, test data, and runtime messages. The chat
-  messages of the bot also exist in Portuguese, in `messages.py`.
+  messages of the bot are translated in `src/sealwharf/locales/`.
 - Communicate with the project owner in Portuguese unless requested otherwise.
 - Never commit certificates, credentials, private documents, or local configuration.
 - Use Angular-style commit messages and review staged changes before each commit.
@@ -34,7 +34,10 @@ command a reader needs.
   `__main__.py`: container entry points (`run`, `check`, `token-driver`,
   `token-check`, `token-retry`, `healthcheck`).
 - `src/sealwharf/signer_config.py`: the single YAML configuration, secrets included.
-- `src/sealwharf/messages.py`: every chat message, in `en` and `pt-br`.
+- `src/sealwharf/locales/*.toml`: one catalog per language (`en` is the
+  reference, plus `pt-br` and `es`) with every chat message, the wake replies
+  and the phrases people may write. `src/sealwharf/messages.py` loads and
+  checks them; no user-facing text lives in the Python code.
 - `Dockerfile`, `compose.yaml`, `docker/fonts.conf`, `config/sealwharf.example.yaml`.
 - `config/`, `data/`: private local state, ignored by Git except the example
   and requirement files. `config/sealwharf.yaml` holds every password and
@@ -69,6 +72,10 @@ docker build -t sealwharf:local .
 - Secrets live only in `config/sealwharf.yaml` and never appear in logs, error
   messages, backups or `repr` output. Operational logs carry no phone numbers,
   names, file names or document content.
-- A new chat message needs a text in every language in `messages.py`.
+- A new chat message needs a text in every language file in `locales/`; a
+  catalog that is incomplete stops the program at start. A phrase people write
+  (wake phrase, answer word, verify caption) goes in the catalogs too, never
+  in the code, and an answer word may not mean different answers in two
+  languages.
 - A token PIN is tried once. After a refusal the guard file in the data folder
   blocks every further login until `token-retry` is run; never loop on a PIN.

@@ -12,17 +12,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 from ..authorization import canonical_number
+from ..messages import normalized, phrase_kind
 from .locking import WorkerLock, worker_lock_path
 
 ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
 SECRET_FILE = re.compile(r"\.(p12|pfx|pem|key|jks|keystore)$", re.IGNORECASE)
-VERIFY_WORDS = frozenset({"verify", "verificar", "check"})
-YES_WORDS = frozenset({"yes", "sim", "approve", "aprovar", "aprovo", "ok"})
-NO_WORDS = frozenset({"no", "nao", "reject", "recusar", "reprovar", "cancel", "cancelar"})
-ALL_WORDS = frozenset({"all", "todos", "todas", "tudo"})
-# The whole message must be exactly this, in any letter case: the number is also a personal one,
-# so nothing that merely resembles the phrase may get a reply.
-WAKE_PHRASES = frozenset({"acorda bot", "acordabot"})
+ANSWERS = {"yes": "1", "no": "0", "all": "all"}
 
 
 class Job(NamedTuple):
@@ -64,19 +59,23 @@ def parse_command(text: object) -> str | None:
     """
     if not isinstance(text, str) or len(text) > 40:
         return None
-    if text.strip().casefold() in WAKE_PHRASES:
+    # The whole message must be exactly a wake phrase, in any supported language and letter case: the
+    # number is also a personal one, so nothing that merely resembles the phrase may get a reply.
+    if phrase_kind(text, ("wake",)) is not None:
         return "ping"
-    words = re.sub(r"[^a-z0-9 ]", "", text.strip().casefold().replace("ã", "a")).split()
-    if len(words) == 1 and (re.fullmatch(r"[0-9]", words[0]) or words[0] in YES_WORDS | NO_WORDS | ALL_WORDS):
-        # One digit, or a plain word, answers the question the bot last asked this number.
-        word = words[0]
-        return "answer " + ("1" if word in YES_WORDS else "0" if word in NO_WORDS else "all" if word in ALL_WORDS else word)
-    return None
+    words = re.sub(r"[^a-z0-9 ]", "", normalized(text)).split()
+    if len(words) != 1:
+        return None
+    # One digit, or a plain word in any supported language, answers the question the bot last asked this number.
+    if re.fullmatch(r"[0-9]", words[0]):
+        return "answer " + words[0]
+    kind = phrase_kind(words[0], tuple(ANSWERS))
+    return "answer " + ANSWERS[kind] if kind is not None else None
 
 
 def asks_verification(caption: object) -> bool:
     """Whether the caption of a document asks to check its signatures instead of signing it."""
-    return isinstance(caption, str) and caption.strip().casefold() in VERIFY_WORDS
+    return phrase_kind(caption, ("verify",)) is not None
 
 
 def accepted_events(payload: object, senders: frozenset[str]) -> list[Job]:

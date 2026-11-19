@@ -1,0 +1,105 @@
+# Brazilian Portuguese. Same entries and {placeholders} as en.toml.
+
+[language]
+name = "Português (Brasil)"
+
+[phrases]
+# The whole message must be exactly one of these (capitals do not matter) for the bot to show it is alive.
+wake = ["acorda bot", "acordabot"]
+# Single words taken as an answer to the question the bot has just asked. Accents and capitals do not matter.
+yes = ["sim", "aprovar", "aprovo", "ok"]
+no = ["não", "recusar", "reprovar", "cancelar"]
+all = ["todos", "todas", "tudo"]
+# Caption of a PDF that asks to check its signatures instead of signing it.
+verify = ["verificar"]
+
+[replies]
+# Answers to the wake phrase, one picked at random: sleepy, eager or grumpy.
+wake = [
+    "Tô acordado, só de olho fechado.",
+    "Só mais cinco minutinhos...",
+    "Quem dorme é o cartório. Eu tô aqui.",
+    "Acordei! Sonhei que assinava em três vias.",
+    "Hã? Quê? Tô aqui, tô aqui.",
+    "Bocejo... pronto, acordei.",
+    "Eu não estava dormindo, estava economizando energia.",
+    "Acordado e de caneta na mão.",
+    "Presente! Pode mandar o documento.",
+    "De pé, com café e certificado válido.",
+    "Firme e forte. O que vamos assinar hoje?",
+    "Online, operante e com a caneta cheia.",
+    "Bom dia, boa tarde ou boa noite: tô aqui.",
+    "Acordadíssimo. Manda ver.",
+    "Eu nem durmo, quem dorme é você.",
+    "Calma, já vai... tô procurando a caneta.",
+    "Opa, quem foi que me chamou?",
+    "De novo? Tá bom, tô aqui.",
+    "Precisava gritar? Eu já estava acordado.",
+    "Trabalho sem férias e ainda me acordam assim.",
+]
+
+[messages]
+received = "Recebido! Estou processando..."
+fonts_replaced = "Seu documento Word foi convertido para PDF. Substituí as fontes que não tenho: {fonts}. Para um resultado perfeito, envie o documento em PDF."
+signed_by = "Tudo certo! Assinado por: {signed}."
+no_location = "Não encontrei um local claro para a assinatura de: {names}. Nada foi assinado. Cada signatário precisa do nome completo junto a uma única linha ou campo de assinatura vazio."
+rate_limited = "Você enviou muitos documentos na última hora. Tente novamente daqui a pouco."
+processing_failed = "Desculpe, não consegui processar este documento, então nada foi assinado. Confira o arquivo e envie novamente."
+certificate_rejected = "Desculpe, um certificado está vencido, revogado ou não pôde ser validado. Nada foi assinado."
+refused_secret = "Para a sua segurança, nunca envie certificados, chaves ou senhas por aqui. Ignorei o arquivo e não o baixei. Se era um certificado real, considere-o exposto e substitua-o."
+choose = "Mais de uma pessoa pode assinar. Quem deve assinar? Responda com um número em até {minutes} minuto(s):\n{options}\n{all} - Todos\n0 - Cancelar"
+needs_approval = "precisa de aprovação"
+choose_unplaced = "Não encontrei um local claro para a assinatura de: {names}."
+ask_owner = "Para assinar como {name}, preciso da aprovação de {owner}. Responda em até {minutes} minuto(s):\n1 - Enviar para {owner} e pedir a aprovação\n0 - Cancelar"
+about = "Sobre {file}:"
+about_many = "Sobre {count} documentos ({files}):"
+a_document = "documento"
+owner_asked = "Pronto! Enviei o documento para {owners} aprovar. Você o receberá assinado assim que for aprovado."
+owner_queued = "Seu documento está na fila para a aprovação de {owners}, com {ahead} pedido(s) na frente. Vou pedir assim que chegar a vez dele; não precisa enviar novamente."
+queue_full = "{owner} já tem muitos pedidos aguardando aprovação, então não incluí este. Envie novamente mais tarde."
+duplicate = "Você já tinha enviado este mesmo arquivo, então estou tratando dele uma vez só."
+answer_invalid = "Essa não é uma das opções. Responda com um dos números que eu listei."
+choice_cancelled = "Cancelado. Nada foi assinado."
+choice_expired = "Não recebi a sua resposta a tempo, então nada foi assinado. Envie o documento novamente se ainda precisar."
+approval_request = "Olá! Recebemos um pedido de {requester} para assinar o documento a seguir com o seu certificado digital. Digite 1 para aprovar e 0 ou ignore para reprovar."
+approval_request_many = "Olá! Recebemos um pedido de {requester} para assinar os {count} documentos a seguir com o seu certificado digital: {files}. Digite 1 para aprovar todos e 0 ou ignore para reprovar todos."
+approved = "Aprovado! O documento foi assinado."
+refused = "Reprovado. Nada foi assinado."
+approval_failed = "Desculpe, não consegui assinar o documento. Nada foi assinado."
+approval_rejected = "Desculpe, o seu certificado está vencido, revogado ou não pôde ser validado. Nada foi assinado."
+progress = "Já assinaram: {signed}. Ainda aguardando a aprovação de: {waiting}."
+summary = "Veja o que aconteceu com os seus documentos:"
+sum_signed_by = "Assinado"
+sum_fonts_replaced = "Convertido do Word com fontes substituídas ({fonts})"
+sum_no_location = "NÃO assinado, sem local claro para assinar"
+sum_rate_limited = "NÃO assinado, acima do limite por hora"
+sum_processing_failed = "NÃO assinado, não foi possível processar"
+sum_certificate_rejected = "NÃO assinado, certificado vencido, revogado ou não validado"
+sum_owner_asked = "Enviado para {owners} aprovar"
+sum_owner_queued = "Na fila para a aprovação de {owners}"
+sum_queue_full = "NÃO assinado, {owner} tem pedidos demais aguardando; envie novamente mais tarde"
+sum_duplicate = "Enviado duas vezes, tratado uma vez só"
+sum_choice_cancelled = "Cancelado"
+sum_choice_expired = "NÃO assinado, sem resposta a tempo"
+sum_progress = "Assinado por {signed}, aguardando a aprovação de {waiting}"
+sum_partial = "Assinado por {signed}, mas NÃO por {missing}"
+sum_not_signed = "NÃO assinado (não aprovado a tempo, reprovado ou falhou)"
+sum_approved = "Aprovado e assinado"
+sum_refused = "Reprovado"
+sum_approval_failed = "NÃO assinado, a assinatura falhou"
+sum_approval_rejected = "NÃO assinado, certificado vencido, revogado ou não validado"
+partial = "Assinado por: {signed}. NÃO assinado por: {missing} (não aprovou a tempo, reprovou ou falhou)."
+not_signed = "O documento não foi assinado. Não aprovou a tempo, reprovou ou falhou: {missing}."
+expiry_warning = "Atenção: o certificado \"{certificate}\" vence em {date} (faltam {days} dia(s)). Renove-o para continuar assinando."
+verify_only_pdf = "Só consigo conferir arquivos PDF."
+verify_none = "Este PDF não tem assinaturas digitais."
+verify_found = "{count} assinatura(s) encontrada(s):"
+verify_valid = "VÁLIDA"
+verify_invalid = "INVÁLIDA ou documento alterado após a assinatura"
+verify_signed_at = "assinado em {moment}"
+verify_timestamped = "com carimbo de tempo"
+verify_expired = "certificado fora do período de validade"
+verify_unknown = "Signatário desconhecido"
+verify_all_valid = "Todas as assinaturas são válidas."
+verify_some_invalid = "Pelo menos uma assinatura NÃO é válida."
+verify_scope = "Isto confere apenas a integridade, não se a autoridade certificadora é confiável."

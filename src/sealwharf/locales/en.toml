@@ -1,0 +1,106 @@
+# English. This is the reference catalog: every other language has exactly these entries,
+# with the same {placeholders}. To add a language, copy this file and translate the values.
+
+[language]
+name = "English"
+
+[phrases]
+# The whole message must be exactly one of these (capitals do not matter) for the bot to show it is alive.
+wake = ["wake up bot", "wakeupbot"]
+# Single words taken as an answer to the question the bot has just asked. Accents and capitals do not matter.
+yes = ["yes", "approve", "ok"]
+no = ["no", "reject", "cancel"]
+all = ["all"]
+# Caption of a PDF that asks to check its signatures instead of signing it.
+verify = ["verify", "check"]
+
+[replies]
+# Answers to the wake phrase, one picked at random: sleepy, eager or grumpy.
+wake = [
+    "I'm awake, just resting my eyes.",
+    "Five more minutes...",
+    "The notary's office sleeps. I don't.",
+    "I'm up! I dreamed I was signing in triplicate.",
+    "Huh? What? I'm here, I'm here.",
+    "Yawn... okay, I'm awake.",
+    "I wasn't sleeping, I was saving energy.",
+    "Awake and pen in hand.",
+    "Present! Send the document over.",
+    "Up, with coffee and a valid certificate.",
+    "Going strong. What are we signing today?",
+    "Online, running and with a full pen.",
+    "Good morning, afternoon or evening: I'm here.",
+    "Wide awake. Bring it on.",
+    "I never sleep. You're the one who does.",
+    "Hold on, coming... just looking for my pen.",
+    "Hey, who called me?",
+    "Again? Fine, I'm here.",
+    "No need to shout, I was already awake.",
+    "No vacation, and this is how I get woken up.",
+]
+
+[messages]
+received = "Got it! Working on it..."
+fonts_replaced = "Your Word document was converted to PDF. I replaced the fonts I do not have: {fonts}. For a perfect result, send the document as PDF."
+signed_by = "All set! Signed by: {signed}."
+no_location = "I could not find a clear place to sign for: {names}. Nothing was signed. Each signer needs their full name next to one empty signature line or field."
+rate_limited = "You have sent many documents in the last hour. Please try again a little later."
+processing_failed = "Sorry, I could not process this document, so nothing was signed. Please check the file and send it again."
+certificate_rejected = "Sorry, a signing certificate is expired, revoked or could not be validated. Nothing was signed."
+refused_secret = "For your safety, never send certificates, keys or passwords here. I ignored the file and did not download it. If it was a real certificate, consider it exposed and replace it."
+choose = "More than one person can sign. Who should sign? Reply with a number within {minutes} minute(s):\n{options}\n{all} - All of them\n0 - Cancel"
+needs_approval = "needs approval"
+choose_unplaced = "I could not find a clear place to sign for: {names}."
+ask_owner = "To sign as {name}, I need the approval of {owner}. Reply within {minutes} minute(s):\n1 - Send to {owner} and ask for approval\n0 - Cancel"
+about = "About {file}:"
+about_many = "About {count} documents ({files}):"
+a_document = "document"
+owner_asked = "Done! I sent the document to {owners} for approval. You will receive it signed as soon as it is approved."
+owner_queued = "Your document is in line for the approval of {owners}, with {ahead} request(s) ahead of it. I will ask as soon as it is its turn; you do not need to send it again."
+queue_full = "{owner} already has many requests waiting for approval, so I did not add this one. Please send it again later."
+duplicate = "You had already sent this same file, so I am handling it only once."
+answer_invalid = "That is not one of the options. Please reply with one of the numbers I listed."
+choice_cancelled = "Cancelled. Nothing was signed."
+choice_expired = "I did not get your answer in time, so nothing was signed. Send the document again if you still need it."
+approval_request = "Hello! {requester} asks you to sign the following document with your digital certificate. Reply 1 to approve. Reply 0, or simply ignore this message, to refuse."
+approval_request_many = "Hello! {requester} asks you to sign the following {count} documents with your digital certificate: {files}. Reply 1 to approve all of them. Reply 0, or simply ignore this message, to refuse all of them."
+approved = "Approved! The document was signed."
+refused = "Refused. Nothing was signed."
+approval_failed = "Sorry, I could not sign the document. Nothing was signed."
+approval_rejected = "Sorry, your certificate is expired, revoked or could not be validated. Nothing was signed."
+progress = "Signed so far: {signed}. Still waiting for the approval of: {waiting}."
+summary = "Here is what happened with your documents:"
+sum_signed_by = "Signed"
+sum_fonts_replaced = "Converted from Word with replaced fonts ({fonts})"
+sum_no_location = "NOT signed, no clear place to sign"
+sum_rate_limited = "NOT signed, over the hourly limit"
+sum_processing_failed = "NOT signed, could not be processed"
+sum_certificate_rejected = "NOT signed, certificate expired, revoked or not validated"
+sum_owner_asked = "Sent to {owners} for approval"
+sum_owner_queued = "In line for the approval of {owners}"
+sum_queue_full = "NOT signed, {owner} has too many requests waiting; send again later"
+sum_duplicate = "Sent twice, handled once"
+sum_choice_cancelled = "Cancelled"
+sum_choice_expired = "NOT signed, no answer in time"
+sum_progress = "Signed by {signed}, waiting for the approval of {waiting}"
+sum_partial = "Signed by {signed}, but NOT by {missing}"
+sum_not_signed = "NOT signed (not approved in time, refused or failed)"
+sum_approved = "Approved and signed"
+sum_refused = "Refused"
+sum_approval_failed = "NOT signed, signing failed"
+sum_approval_rejected = "NOT signed, certificate expired, revoked or not validated"
+partial = "Signed by: {signed}. NOT signed by: {missing} (not approved in time, refused or failed)."
+not_signed = "The document was not signed. Not approved in time, refused or failed: {missing}."
+expiry_warning = "Heads up: the certificate \"{certificate}\" expires on {date} ({days} day(s) left). Renew it to keep signing."
+verify_only_pdf = "I can only check PDF files."
+verify_none = "This PDF has no digital signatures."
+verify_found = "{count} signature(s) found:"
+verify_valid = "VALID"
+verify_invalid = "INVALID or document changed after signing"
+verify_signed_at = "signed {moment}"
+verify_timestamped = "with timestamp"
+verify_expired = "certificate was outside its validity period"
+verify_unknown = "Unknown signer"
+verify_all_valid = "All signatures are valid."
+verify_some_invalid = "At least one signature is NOT valid."
+verify_scope = "This checks integrity only, not whether a certificate authority is trusted."

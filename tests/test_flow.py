@@ -2,7 +2,6 @@
 
 import hashlib
 import logging
-import string
 import time
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
@@ -25,7 +24,7 @@ from sealwharf.application.signers import unlock_signers, warn_expiring
 from sealwharf.application.worker import Runtime, ask_questions, expire_requests, process_one, tell_outcomes
 from sealwharf.authorization import canonical_number, format_number
 from sealwharf.documents.verification import describe, verify_signatures
-from sealwharf.messages import LANGUAGES, MESSAGES, WAKE_REPLIES, wake_reply
+from sealwharf.messages import CATALOGS, wake_reply
 from sealwharf.signer_config import SignerConfig, load_config
 
 OWNER_A, OWNER_B, OWNER_C = "5511900000001", "5511900000002", "5511900000003"
@@ -68,7 +67,7 @@ def make_pdf(*names, password=None):
 
 
 class Chat:
-    COURTESY = ("Got it!", "Recebido!", "All set!", "Tudo certo!")
+    COURTESY = ("Got it!", "Recebido!", "¡Recibido!", "All set!", "Tudo certo!", "¡Listo! Firmado")
 
     def __init__(self):
         self.documents, self.texts, self.files, self.downloads, self.notes, self.forwarded = {}, [], [], [], [], []
@@ -607,13 +606,12 @@ def test_verify_command_checks_every_signature_without_signing(world):
 
 def test_wake_phrase_gets_one_of_the_replies_to_show_the_bot_is_alive(world):
     message = world.send(OWNER_A, text="Acorda Bot")
-    assert len(world.chat.to(OWNER_A)) == 1 and world.chat.to(OWNER_A)[0] in WAKE_REPLIES["en"] and world.state(message) == "done"
+    assert len(world.chat.to(OWNER_A)) == 1 and world.chat.to(OWNER_A)[0] in CATALOGS["en"].replies["wake"] and world.state(message) == "done"
     portuguese = Runtime(world.runtime.data_dir, languages={OWNER_B: "pt-br"})
     world.inbox.add([Job("wake", "", None, OWNER_B, "text", parse_command("acordabot"))])
     assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
-    assert world.chat.to(OWNER_B)[0] in WAKE_REPLIES["pt-br"]
-    # Twenty different replies in each language, one picked at random.
-    assert all(len(replies) == len(set(replies)) == 20 for replies in WAKE_REPLIES.values()) and set(WAKE_REPLIES) == set(LANGUAGES)
+    assert world.chat.to(OWNER_B)[0] in CATALOGS["pt-br"].replies["wake"]
+    # One of the replies is picked at random.
     assert len({wake_reply("pt-br") for _ in range(200)}) > 5
     assert not world.chat.files and not world.chat.downloads and world.audit.entries() == []
 
@@ -723,11 +721,27 @@ def test_each_person_is_answered_in_their_own_language(world):
     assert world.chat.notes[-1] == (PREPARER, "Tudo certo! Assinado por: Alice Example.")
 
 
-def test_every_message_exists_in_every_language_with_the_same_fields():
-    for key, variants in MESSAGES.items():
-        assert set(variants) == set(LANGUAGES), key
-        fields = [{name for _, name, _, _ in string.Formatter().parse(variants[language]) if name} for language in LANGUAGES]
-        assert all(names == fields[0] for names in fields), key
+def test_a_spanish_speaker_is_asked_and_answered_in_spanish(world):
+    spanish = Runtime(world.runtime.data_dir, languages={PREPARER: "es", OWNER_A: "es"}, names=dict(PEOPLE))
+
+    def step(message, body=None, document=None):
+        if document is not None:
+            world.chat.documents[message] = document
+        world.inbox.add([Job(message, message if document else "", "informe.pdf" if document else None,
+                             OWNER_A if message.startswith("owner") else PREPARER, "document" if document else "text", body)])
+        assert process_one(world.inbox, world.chat, world.signers, runtime=spanish)
+    step("es1", parse_command("Despierta Bot"))
+    assert world.chat.to(PREPARER)[0] in CATALOGS["es"].replies["wake"]
+    step("es2", document=make_pdf("Alice Example"))
+    assert world.chat.notes[0] == (PREPARER, "¡Recibido! Lo estoy procesando...")
+    assert world.chat.to(PREPARER)[1].startswith("Sobre informe.pdf:\nPara firmar como Alice Example, necesito la aprobación de Ana.")
+    step("es3", parse_command("Sí"))
+    assert world.chat.to(OWNER_A)[0].startswith("¡Hola! Paulo Preparer (+55 11 90000-0010) te pide firmar el siguiente documento")
+    assert world.chat.to(PREPARER)[2].startswith("¡Listo! Envié el documento a Ana para su aprobación.")
+    step("owner1", parse_command("aprobar"))
+    assert world.chat.to(OWNER_A)[-1] == "¡Aprobado! El documento fue firmado."
+    assert world.chat.notes[-1] == (PREPARER, "¡Listo! Firmado por: Alice Example.")
+    assert signer_names(world.chat.files[0][1]) == ["Alice Example"]
 
 
 def test_brazilian_numbers_match_with_or_without_the_ninth_digit(world):

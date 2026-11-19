@@ -1,0 +1,105 @@
+# Spanish. Same entries and {placeholders} as en.toml.
+
+[language]
+name = "Español"
+
+[phrases]
+# The whole message must be exactly one of these (capitals do not matter) for the bot to show it is alive.
+wake = ["despierta bot", "despiertabot"]
+# Single words taken as an answer to the question the bot has just asked. Accents and capitals do not matter.
+yes = ["sí", "aprobar", "apruebo", "vale"]
+no = ["rechazar", "rechazo", "cancelar"]
+all = ["todos", "todas", "todo"]
+# Caption of a PDF that asks to check its signatures instead of signing it.
+verify = ["verificar", "comprobar"]
+
+[replies]
+# Answers to the wake phrase, one picked at random: sleepy, eager or grumpy.
+wake = [
+    "Estoy despierto, solo descansaba los ojos.",
+    "Cinco minutitos más...",
+    "La que duerme es la notaría. Yo estoy aquí.",
+    "¡Desperté! Soñé que firmaba por triplicado.",
+    "¿Eh? ¿Qué? Aquí estoy, aquí estoy.",
+    "Bostezo... listo, ya desperté.",
+    "No estaba durmiendo, estaba ahorrando energía.",
+    "Despierto y con el bolígrafo en la mano.",
+    "¡Presente! Puedes enviar el documento.",
+    "De pie, con café y certificado vigente.",
+    "Firme y fuerte. ¿Qué vamos a firmar hoy?",
+    "En línea, funcionando y con el bolígrafo lleno.",
+    "Buenos días, buenas tardes o buenas noches: aquí estoy.",
+    "Despiertísimo. Adelante.",
+    "Yo ni duermo, el que duerme eres tú.",
+    "Calma, ya voy... estoy buscando el bolígrafo.",
+    "Epa, ¿quién me llamó?",
+    "¿Otra vez? Está bien, aquí estoy.",
+    "¿Hacía falta gritar? Ya estaba despierto.",
+    "Trabajo sin vacaciones y encima me despiertan así.",
+]
+
+[messages]
+received = "¡Recibido! Lo estoy procesando..."
+fonts_replaced = "Tu documento de Word fue convertido a PDF. Sustituí las fuentes que no tengo: {fonts}. Para un resultado perfecto, envía el documento en PDF."
+signed_by = "¡Listo! Firmado por: {signed}."
+no_location = "No encontré un lugar claro para la firma de: {names}. No se firmó nada. Cada firmante necesita su nombre completo junto a una única línea o campo de firma vacío."
+rate_limited = "Has enviado muchos documentos en la última hora. Inténtalo de nuevo un poco más tarde."
+processing_failed = "Lo siento, no pude procesar este documento, así que no se firmó nada. Revisa el archivo y envíalo de nuevo."
+certificate_rejected = "Lo siento, un certificado de firma está vencido, revocado o no pudo validarse. No se firmó nada."
+refused_secret = "Por tu seguridad, nunca envíes certificados, claves o contraseñas por aquí. Ignoré el archivo y no lo descargué. Si era un certificado real, considéralo expuesto y reemplázalo."
+choose = "Más de una persona puede firmar. ¿Quién debe firmar? Responde con un número en un máximo de {minutes} minuto(s):\n{options}\n{all} - Todos\n0 - Cancelar"
+needs_approval = "necesita aprobación"
+choose_unplaced = "No encontré un lugar claro para la firma de: {names}."
+ask_owner = "Para firmar como {name}, necesito la aprobación de {owner}. Responde en un máximo de {minutes} minuto(s):\n1 - Enviar a {owner} y pedir la aprobación\n0 - Cancelar"
+about = "Sobre {file}:"
+about_many = "Sobre {count} documentos ({files}):"
+a_document = "documento"
+owner_asked = "¡Listo! Envié el documento a {owners} para su aprobación. Lo recibirás firmado en cuanto sea aprobado."
+owner_queued = "Tu documento está en la fila para la aprobación de {owners}, con {ahead} solicitud(es) por delante. Lo pediré en cuanto llegue su turno; no hace falta enviarlo de nuevo."
+queue_full = "{owner} ya tiene muchas solicitudes esperando aprobación, así que no incluí esta. Envíala de nuevo más tarde."
+duplicate = "Ya habías enviado este mismo archivo, así que lo estoy tratando una sola vez."
+answer_invalid = "Esa no es una de las opciones. Responde con uno de los números que indiqué."
+choice_cancelled = "Cancelado. No se firmó nada."
+choice_expired = "No recibí tu respuesta a tiempo, así que no se firmó nada. Envía el documento de nuevo si todavía lo necesitas."
+approval_request = "¡Hola! {requester} te pide firmar el siguiente documento con tu certificado digital. Responde 1 para aprobar. Responde 0, o simplemente ignora este mensaje, para rechazar."
+approval_request_many = "¡Hola! {requester} te pide firmar los siguientes {count} documentos con tu certificado digital: {files}. Responde 1 para aprobarlos todos. Responde 0, o simplemente ignora este mensaje, para rechazarlos todos."
+approved = "¡Aprobado! El documento fue firmado."
+refused = "Rechazado. No se firmó nada."
+approval_failed = "Lo siento, no pude firmar el documento. No se firmó nada."
+approval_rejected = "Lo siento, tu certificado está vencido, revocado o no pudo validarse. No se firmó nada."
+progress = "Ya firmaron: {signed}. Todavía se espera la aprobación de: {waiting}."
+summary = "Esto es lo que pasó con tus documentos:"
+sum_signed_by = "Firmado"
+sum_fonts_replaced = "Convertido de Word con fuentes sustituidas ({fonts})"
+sum_no_location = "NO firmado, sin lugar claro para firmar"
+sum_rate_limited = "NO firmado, por encima del límite por hora"
+sum_processing_failed = "NO firmado, no se pudo procesar"
+sum_certificate_rejected = "NO firmado, certificado vencido, revocado o no validado"
+sum_owner_asked = "Enviado a {owners} para su aprobación"
+sum_owner_queued = "En la fila para la aprobación de {owners}"
+sum_queue_full = "NO firmado, {owner} tiene demasiadas solicitudes en espera; envíalo de nuevo más tarde"
+sum_duplicate = "Enviado dos veces, tratado una sola vez"
+sum_choice_cancelled = "Cancelado"
+sum_choice_expired = "NO firmado, sin respuesta a tiempo"
+sum_progress = "Firmado por {signed}, esperando la aprobación de {waiting}"
+sum_partial = "Firmado por {signed}, pero NO por {missing}"
+sum_not_signed = "NO firmado (no aprobado a tiempo, rechazado o con fallo)"
+sum_approved = "Aprobado y firmado"
+sum_refused = "Rechazado"
+sum_approval_failed = "NO firmado, la firma falló"
+sum_approval_rejected = "NO firmado, certificado vencido, revocado o no validado"
+partial = "Firmado por: {signed}. NO firmado por: {missing} (no aprobó a tiempo, rechazó o falló)."
+not_signed = "El documento no fue firmado. No aprobó a tiempo, rechazó o falló: {missing}."
+expiry_warning = "Atención: el certificado \"{certificate}\" vence el {date} (quedan {days} día(s)). Renuévalo para seguir firmando."
+verify_only_pdf = "Solo puedo comprobar archivos PDF."
+verify_none = "Este PDF no tiene firmas digitales."
+verify_found = "{count} firma(s) encontrada(s):"
+verify_valid = "VÁLIDA"
+verify_invalid = "INVÁLIDA o documento modificado después de la firma"
+verify_signed_at = "firmado el {moment}"
+verify_timestamped = "con sello de tiempo"
+verify_expired = "el certificado estaba fuera de su período de validez"
+verify_unknown = "Firmante desconocido"
+verify_all_valid = "Todas las firmas son válidas."
+verify_some_invalid = "Al menos una firma NO es válida."
+verify_scope = "Esto comprueba solo la integridad, no si la autoridad certificadora es de confianza."

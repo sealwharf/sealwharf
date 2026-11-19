@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from .authorization import canonical_number
-from .messages import DEFAULT_LANGUAGE, LANGUAGES
+from .messages import DEFAULT_LANGUAGE, LANGUAGES, resolve_language
 
 NUMBER = re.compile(r"[0-9]{9,15}")
 PUBLIC_URL = re.compile(r"https://[a-z0-9]([a-z0-9.-]{0,250}[a-z0-9])?")
@@ -93,8 +93,8 @@ def load_config(path: Path) -> AppConfig:
     if not isinstance(config, dict) or set(config) - {"public_url", "whapi_token", "tunnel_token", "language", "contacts", "certificates", "limits"}:
         raise ValueError("The configuration may contain only public_url, whapi_token, tunnel_token, language, contacts, "
                          "certificates and limits.")
-    default_language = str(config.get("language", DEFAULT_LANGUAGE)).casefold()
-    if default_language not in LANGUAGES:
+    default_language = resolve_language(str(config.get("language", DEFAULT_LANGUAGE)))
+    if default_language is None:
         raise ValueError("language must be one of: " + ", ".join(LANGUAGES) + ".")
     tokens = {}
     for key in ("whapi_token", "tunnel_token"):
@@ -144,8 +144,8 @@ def _parse_contacts(value: object, default_language: str) -> dict[str, Contact]:
         name = person.get("name")
         if name is not None and (not isinstance(name, str) or not name.strip() or len(name) > 80 or "\n" in name):
             raise ValueError(f"The name of contact {identifier} must be a short text.")
-        language = str(person.get("lang", default_language)).casefold()
-        if language not in LANGUAGES:
+        language = resolve_language(str(person.get("lang", default_language)))
+        if language is None:
             raise ValueError(f"The lang of contact {identifier} must be one of: " + ", ".join(LANGUAGES) + ".")
         number = canonical_number(person["number"])
         if any(other.number == number for other in contacts.values()):

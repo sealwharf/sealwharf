@@ -14,7 +14,7 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 
 [tool.setuptools.package-data]
-sealwharf = ["assets/*.png"]
+sealwharf = ["assets/*.png", "locales/*.toml"]
 
 [tool.ruff]
 line-length = 140

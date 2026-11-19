@@ -80,7 +80,7 @@ Go back to the Cloudflare page: the tunnel now appears as connected. Continue, c
 - **Subdomain and domain:** the address you wrote in `public_url`, for example `bot` + `example.com`.
 - **Service URL:** `http://localhost:8000`
 
-A minute later the bot is ready. To confirm, send it the words `acorda bot` from your WhatsApp: it answers with a short, playful line, such as "I'm awake, just resting my eyes."
+A minute later the bot is ready. To confirm, send it the words `wake up bot` from your WhatsApp (or `acorda bot`, or `despierta bot`): it answers with a short, playful line, such as "I'm awake, just resting my eyes."
 
 ## Using it
 
@@ -98,9 +98,19 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 | You send | The bot does |
 | --- | --- |
 | A PDF or Word document | Signs it and sends it back. |
-| `1`, `2`, `0`… or `sim`, `não`, `todos` | Takes it as your answer to the question it just asked. |
+| `1`, `2`, `0`… or a word such as `yes`, `no`, `all` | Takes it as your answer to the question it just asked. |
 | A PDF with the caption `verify` (or `verificar`) | Checks the signatures of that PDF, without signing. |
-| `acorda bot` | Answers with one of twenty playful lines, to show it is working. Capitals do not matter and `acordabot` works too, but the message must be exactly that. |
+| `wake up bot` | Answers with one of twenty playful lines, to show it is working. Capitals do not matter and `wakeupbot` works too, but the message must be exactly that. |
+
+**Languages.** The bot speaks English (`en`), Brazilian Portuguese (`pt-br`) and Spanish (`es`). Each person reads the language set for them in `contacts`, and everyone may write in any of the three:
+
+| | English | Português | Español |
+| --- | --- | --- | --- |
+| Check that the bot is working | `wake up bot` | `acorda bot` | `despierta bot` |
+| Answer yes | `yes`, `approve`, `ok` | `sim`, `aprovar` | `sí`, `aprobar`, `vale` |
+| Answer no | `no`, `reject`, `cancel` | `não`, `recusar`, `cancelar` | `no`, `rechazar`, `cancelar` |
+| Answer all | `all` | `todos` | `todos` |
+| Caption to check signatures | `verify` | `verificar` | `comprobar` |
 
 **When more than one person can sign.** If the document has the names of several signers you may use, the bot asks who should sign and you reply with a number: one of them, all of them, or cancel.
 
@@ -124,7 +134,7 @@ When the owner replies `1`, the document is signed and sent back to you.
 Everything lives in `config/sealwharf.yaml`. Register each person once under `contacts`, then use their ids in the certificates:
 
 ```yaml
-language: pt-br                    # language for contacts that set no lang: en or pt-br
+language: pt-br                    # language for contacts that set no lang: en, pt-br or es
 
 contacts:
   john:
@@ -273,7 +283,7 @@ docker compose run --rm sealwharf check
 
 | What you see | What to do |
 | --- | --- |
-| The bot does not answer `acorda bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the Whapi channel is connected. |
+| The bot does not answer `wake up bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the Whapi channel is connected. |
 | `docker compose ps` shows the bot restarting | Run `docker compose logs sealwharf` and the check above. The usual causes are a mistake in the configuration or the Cloudflare route from step 5 not created yet. |
 | "I could not find a clear place to sign" | The document needs the signer's full name, as in the certificate, next to one empty signature line. The name must appear only once as a signature label. |
 | "Could not open certificate" | The password is wrong, or the certificate file is not in `config/certificates/`. |
@@ -299,7 +309,7 @@ To get exactly the same result as on your computer, do one of these:
 
 ## Good to know
 
-- **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact message `acorda bot` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
+- **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact message `wake up bot` (or its Portuguese or Spanish form) sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
 - **Privacy.** Documents and certificates are processed on your computer. Whapi and Cloudflare only carry the messages. Certificates and passwords are never accepted through the chat: a `.p12` file sent to the bot is refused without being opened.
 - **Record of signatures.** Every signature is recorded with the time, who asked, who approved and the fingerprint of the document. Read the record with `docker compose exec sealwharf cat /data/audit.jsonl`.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.
@@ -335,6 +345,8 @@ Python 3.12 with `config/requirements-dev.txt`. The code is under `src/sealwharf
 ```bash
 python -m pytest -q
 ```
+
+**Adding a language.** Each language is one file in `src/sealwharf/locales/`, named after its code. Copy `en.toml` to, say, `fr.toml`, translate the values and keep the `{placeholders}` as they are. Nothing else changes: the new code is accepted in `language` and `lang` at once. The bot refuses to start, and the tests fail, while a language file lacks an entry or uses other placeholders, so a language is never half translated.
 
 ```bash
 python -m ruff check src tests
