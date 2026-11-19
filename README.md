@@ -100,10 +100,41 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 | A PDF or Word document | Signs it and sends it back. |
 | `1`, `2`, `0`… or a word such as `yes`, `no`, `all` | Takes it as your answer to the question it just asked. |
 | A PDF with the caption `verify` (or `verificar`) | Checks the signatures of that PDF, without signing. |
-| `wake up bot` | Answers with one of twenty-five playful lines, in whatever mood it happens to be, to show it is working. Capitals do not matter and `wakeupbot` works too, but the message must be exactly that. |
-| `bot status` | Lists the certificates that are installed, with the date each one expires and the days left, and tells how many documents wait for an answer. |
+| `wake up bot` | Answers with a short, playful line, to show it is working. |
+| `bot status` | Lists the installed certificates with their expiry dates, and how many documents wait for an answer. |
 
-**Languages.** The bot speaks English (`en`), Brazilian Portuguese (`pt-br`) and Spanish (`es`). Each person reads the language set for them in `contacts`, and everyone may write in any of the three:
+Anything else you write is ignored, so the number can still be used for ordinary conversations.
+
+### The two commands
+
+Both commands work only for the numbers in `contacts`, and only when the message is exactly the command. Capital letters do not matter, and the words may be written together (`wakeupbot`, `botstatus`). A message that merely resembles a command, such as `wake up bot!` or `status`, gets no answer.
+
+**`wake up bot`** is the quick test that the bot is alive. It answers with one of twenty-five lines, picked at random, in whatever mood it happens to be: sleepy, eager, grumpy, dramatic or sarcastic. For example:
+
+> Zzz... sign here... zzz... oh! Hi. I'm awake.
+
+> You woke me up for this? There had better be a document coming.
+
+> Pen? Got it. Certificate? Got it. Will to live? Loading...
+
+Each language has its own phrase (`wake up bot`, `acorda bot`, `despierta bot`). All three work for everyone, and the answer comes in the language of whoever asked.
+
+**`bot status`** shows how the bot is doing. It is written the same way in every language, and the answer comes in the language of whoever asked:
+
+```text
+Up and running. Certificates installed: 2.
+1. John Doe (file): valid until 2027-08-14, 268 day(s) left
+2. Jane Doe (USB token): expires on 2026-12-10, only 21 day(s) left. Time to renew it!
+Documents waiting for an answer: 0.
+```
+
+- Each certificate shows the name of its holder, whether it is a file or a USB token, the date it expires and the days left.
+- A certificate with 30 days or less is marked for renewal, and one past its date is marked `EXPIRED`.
+- The last line counts the documents that still wait for somebody's answer.
+
+### Languages
+
+The bot speaks English (`en`), Brazilian Portuguese (`pt-br`) and Spanish (`es`). Each person reads the language set for them in `contacts`, and everyone may write in any of the three:
 
 | | English | Português | Español |
 | --- | --- | --- | --- |
@@ -113,16 +144,7 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 | Answer all | `all` | `todos` | `todos` |
 | Caption to check signatures | `verify` | `verificar` | `comprobar` |
 
-`bot status` is written the same way in every language (`botstatus` works too), and the answer comes in the language of whoever asked:
-
-```text
-Up and running. Certificates installed: 2.
-1. John Doe (file): valid until 2027-08-14, 268 day(s) left
-2. Jane Doe (USB token): expires on 2026-12-10, only 21 day(s) left. Time to renew it!
-Documents waiting for an answer: 0.
-```
-
-Anyone in `contacts` may ask for it.
+### Who signs and who approves
 
 **When more than one person can sign.** If the document has the names of several signers you may use, the bot asks who should sign and you reply with a number: one of them, all of them, or cancel.
 
@@ -132,14 +154,29 @@ Anyone in `contacts` may ask for it.
 
 When the owner replies `1`, the document is signed and sent back to you.
 
-**Sending many documents at once.** Select all the files and send them together. The bot treats them as one batch:
+### Sending many documents at once
+
+Select all the files and send them together. The bot waits about five seconds after your last file, so that everything you sent together is handled as one batch:
 
 - It says once that it received them, and at the end sends one summary: which files were signed and which were not, and why.
 - If it needs to ask you something, it asks once for all the documents that have the same question.
 - If an owner must approve, the owner gets one message with the list and all the files, and answers once: `1` approves all of them, `0` refuses all of them.
 - The same file sent twice is handled once.
 
-**One question at a time.** Each person has only one open question, so a plain `1` or `0` never answers the wrong document. If the owner is still answering another request, yours waits in line and the bot tells you so; you do not need to send it again. The time to answer starts when the question is asked. Up to 20 documents may wait for the same owner.
+### The waiting line
+
+Each person has only one open question at a time, so a plain `1` or `0` never answers the wrong document. Every other question waits in line for its turn.
+
+- **A new document arrives while the bot waits for your answer.** The first question stays open and your answer goes to it. The question about the new document is asked right after.
+- **The owner is still answering someone else.** Your request waits in line, and the bot tells you how many requests are ahead of yours:
+
+  > Your document is in line for the approval of John Doe, with 2 request(s) ahead of it. I will ask as soon as it is its turn; you do not need to send it again.
+
+- **The time to answer** (5 minutes) starts only when the question is actually asked, never while it waits in line.
+- **No question is dropped in silence.** If nobody answers in time, nothing is signed and whoever sent the document is told so.
+- **The line has a limit.** Up to 20 documents may wait for the same owner. Past that, the bot says the owner has too many requests waiting and asks you to send the document again later.
+
+To see how many documents are waiting right now, send `bot status`.
 
 ## Adding people and certificates
 
