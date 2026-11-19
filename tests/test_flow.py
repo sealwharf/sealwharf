@@ -25,6 +25,7 @@ from sealwharf.adapters.whapi import Whapi, signed_filename
 from sealwharf.application.signers import status_report, unlock_signers, warn_expiring
 from sealwharf.application.worker import Runtime, ask_questions, expire_requests, process_one, tell_outcomes
 from sealwharf.authorization import canonical_number, format_number
+from sealwharf.documents.names import only_in_running_text
 from sealwharf.documents.signing import CertificateRejected, TokenUnavailable
 from sealwharf.documents.verification import describe, verify_signatures
 from sealwharf.messages import CATALOGS, wake_reply
@@ -49,7 +50,7 @@ def make_certificate(folder, alias, common_name, *, days=365, password="pw-"):
     return path
 
 
-def make_pdf(*names, password=None):
+def make_pdf(*names, password=None, text=None):
     writer = PdfWriter()
     page = writer.add_blank_page(width=600, height=800)
     font = DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"),
@@ -59,6 +60,9 @@ def make_pdf(*names, password=None):
     for index, name in enumerate(names):
         y = 650 - index * 150
         content += f"100 {y} m 250 {y} l S BT /F1 10 Tf 110 {y - 15} Td ({name}) Tj ET ".encode("ascii")
+    if text:
+        # A line of plain text near the top, with no signature line.
+        content += f"BT /F1 10 Tf 40 760 Td ({text}) Tj ET ".encode("ascii")
     stream = DecodedStreamObject()
     stream.set_data(content)
     page[NameObject("/Contents")] = writer._add_object(stream)
@@ -253,6 +257,33 @@ def test_the_signer_that_failed_among_several_is_named_and_nothing_is_signed(wor
         pass
     assert world.chat.to(OWNER_A)[-1] == ("Veja o que aconteceu com os seus documentos:\n- Assinado: a.pdf\n"
                                           "- NÃO assinado, a assinatura de Bruno Example não pôde ser feita: b.pdf")
+
+
+def test_a_person_the_document_only_talks_about_is_not_taken_as_a_signer(world):
+    about = "I declare, for academic purposes, that Bruno Example works at this company since 2017"
+    message = world.send(OWNER_A, make_pdf("Alice Example", text=about))
+    assert world.state(message) == "sent" and signer_names(world.chat.files[0][1]) == ["Alice Example"]
+    assert world.chat.to(OWNER_A) == [] and [entry["certificate_id"] for entry in world.audit.entries()] == ["alice"]
+
+
+@pytest.mark.parametrize("written", ["Bruno Example", "I, Bruno Example, declare that everything written above is true",
+                                     "Signature of the witness: Bruno Example"])
+def test_a_signer_named_on_a_line_of_their_own_without_a_clear_place_is_still_asked_about(world, written):
+    message = world.send(OWNER_A, make_pdf("Alice Example", text=written))
+    assert world.state(message) == "awaiting_choice" and not world.chat.files and world.audit.entries() == []
+    assert world.chat.to(OWNER_A)[-1].endswith("I could not find a clear place to sign for: Bruno Example.")
+
+
+def test_a_name_is_running_text_only_when_every_occurrence_is_inside_a_sentence():
+    name = [("bruno", "example")]
+    assert only_in_running_text("We declare that Bruno Example works here since 2017.", name)
+    assert only_in_running_text("It is hereby declared for all purposes that Bruno\nExample has worked here for years", name)
+    assert only_in_running_text("The company states and declares that the employee Bruno Example", name)
+    for label in ("Bruno Example", "Bruno Example\nDirector", "Signature: Bruno Example", "I, Bruno Example, declare that this is true",
+                  "Prof. Dr. Bruno Example, head of the software engineering course",
+                  "We declare that Bruno Example works here since 2017.\n____________\nBruno Example"):
+        assert not only_in_running_text(label, name), label
+    assert not only_in_running_text("We declare that nobody in particular works here.", name)
 
 
 def test_password_protected_pdf_is_refused(world):

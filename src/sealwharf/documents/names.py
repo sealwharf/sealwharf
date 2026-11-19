@@ -34,3 +34,31 @@ def contains_name(source: tuple[str, ...], identity: tuple[str, ...]) -> bool:
     """Report whether consecutive source words form the name or an accepted variant."""
     size = len(identity)
     return any(matches_name(source[index:index + size], identity) for index in range(len(source) - size + 1))
+
+
+def only_in_running_text(text: str, identities: list[tuple[str, ...]]) -> bool:
+    """Report whether a name is written, but only ever in the middle of a sentence.
+
+    The person a document talks about is named inside a sentence; the person
+    who signs it is named on a line of their own, or with a short label. A name
+    counts as part of a sentence when its line has at least three words before
+    it and either three after it or eight around it. One occurrence outside a
+    sentence is enough for the answer to be False, so a doubt is never settled
+    in favour of ignoring a signer.
+    """
+    tokens = [(word, number) for number, line in enumerate(text.splitlines()) for word in name_words(line)]
+    words = tuple(word for word, _ in tokens)
+    lines = [number for _, number in tokens]
+    found = False
+    for identity in identities:
+        size = len(identity)
+        for start in range(len(words) - size + 1):
+            if not matches_name(words[start:start + size], identity):
+                continue
+            found = True
+            end = start + size - 1
+            before = sum(1 for number in lines[:start] if number == lines[start])
+            after = sum(1 for number in lines[end + 1:] if number == lines[end])
+            if before < 3 or (after < 3 and before + after < 8):
+                return False
+    return found

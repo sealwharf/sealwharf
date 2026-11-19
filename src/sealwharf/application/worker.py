@@ -27,7 +27,7 @@ from ..adapters.local_ai import suggest_local_ai_position
 from ..authorization import format_number
 from ..documents.contextual_position import suggest_contextual_position
 from ..documents.docx import convert_docx_to_pdf, substituted_fonts
-from ..documents.names import contains_name, matches_name
+from ..documents.names import contains_name, matches_name, only_in_running_text
 from ..documents.normalize import normalize_rotation
 from ..documents.position import find_signature_position, has_signature_widgets
 from ..documents.signing import (
@@ -185,6 +185,15 @@ def _has_unresolved_name_variant(document: bytes, referenced: tuple[UnlockedSign
                             (len(part) >= 6 and SequenceMatcher(None, suffix, part).ratio() >= 0.9)):
                         return True
     return False
+
+
+def _only_mentioned(document: bytes, signer: UnlockedSigner) -> bool:
+    """Whether the document merely talks about this person: the name is never a field nor on a line of its own."""
+    reader = PdfReader(BytesIO(document), strict=True)
+    identities = [words(name) for name in signer.config.names]
+    if any(contains_name(words(field), identity) for field in (reader.get_fields() or {}) for identity in identities):
+        return False
+    return only_in_running_text("\n".join(page.extract_text() or "" for page in reader.pages), identities)
 
 
 def _locate_signature(document: bytes, signer: UnlockedSigner, contextual_review, general_suggest):
@@ -591,11 +600,13 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
             referenced = ()
         located = [(signer, position) for signer in referenced
                    if (position := _locate_signature(document, signer, contextual_review, general_suggest)) is not None]
-        unplaced = [signer for signer in referenced if all(signer is not placed for placed, _ in located)]
         if not located:
             inbox.set_state(message_id, "needs_review")
             _note(inbox, sender, "no_location", filename, names=", ".join(s.config.name for s in (referenced or authorized)))
             return
+        # Somebody named only inside a sentence, with no place to sign, is the subject of the document, not a signer.
+        unplaced = [signer for signer in referenced
+                    if all(signer is not placed for placed, _ in located) and not _only_mentioned(document, signer)]
         if overlapping([position for _, position in located]):
             raise ValueError("Signature areas overlap.")
         if len(located) == 1 and not unplaced and not located[0][0].config.needs_confirmation(sender):

@@ -183,6 +183,7 @@ def test_multiple_signers_are_not_partially_signed_when_a_position_is_missing(tm
     monkeypatch.setattr("sealwharf.application.worker._locate_signature",
                         lambda doc, signer, *_: SimpleNamespace(page=0, box=(1, 2, 30, 40)) if signer == jane else None)
     monkeypatch.setattr("sealwharf.application.worker.sign_pdf_sequence", lambda *_: (_ for _ in ()).throw(AssertionError()))
+    monkeypatch.setattr("sealwharf.application.worker._only_mentioned", lambda *_: False)
     assert process_one(inbox, client, (jane, john))
     # Jane can still be chosen; John, who has no clear place, is named and never signed for.
     assert not sent and len(notices) == 1 and state(inbox) == "awaiting_choice"

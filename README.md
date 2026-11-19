@@ -93,6 +93,8 @@ For the bot to find where to sign, **the document needs the signer's full name n
                   John Doe
 ```
 
+Only the people who sign need that. A name that appears only inside a sentence, such as the person a declaration is about, is not taken as a signer.
+
 Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` and `JOSE GONCALVES` are the same name for the bot, so a document typed without accents is signed just the same.
 
 | You send | The bot does |
