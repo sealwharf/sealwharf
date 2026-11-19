@@ -38,6 +38,7 @@ from ..documents.signing import (
     TokenPinRejected,
     TokenUnavailable,
     TrustSettings,
+    overlapping,
     sign_pdf,
     sign_pdf_sequence,
 )
@@ -221,20 +222,15 @@ def _locate_named(document: bytes, name: str, visual_review: str, contextual_rev
     return None
 
 
-def _overlapping(positions) -> bool:
-    for index, first in enumerate(positions):
-        for second in positions[:index]:
-            if first.page == second.page and not (first.box[2] <= second.box[0] or second.box[2] <= first.box[0]
-                                                  or first.box[3] <= second.box[1] or second.box[3] <= first.box[1]):
-                return True
-    return False
-
-
 # Signing and recording.
 
+def _place(position) -> SignaturePosition:
+    """The place of a signature, whichever finder suggested it."""
+    return SignaturePosition(position.page, tuple(position.box), getattr(position, "field_name", None))
+
+
 def _request(signer: UnlockedSigner, position) -> SigningRequest:
-    return SigningRequest(signer.config.certificate, signer.password,
-                          SignaturePosition(position.page, tuple(position.box), getattr(position, "field_name", None)),
+    return SigningRequest(signer.config.certificate, signer.password, _place(position),
                           signer.config.logo, signer.config.logo_scale, signer.certificate_fingerprint,
                           TrustSettings(signer.config.timestamp_url, signer.config.trust_roots), token_settings(signer.config))
 
@@ -291,6 +287,23 @@ def _names(signers: tuple[UnlockedSigner, ...], entries: list[PendingSignature],
     return ", ".join(by_id.get(entry.signer_id, entry.signer_id) for entry in entries if entry.status in statuses)
 
 
+def _new_request() -> str:
+    return uuid4().hex[:12]
+
+
+def _entry(request_id: str, signer: UnlockedSigner, position, status: str) -> PendingSignature:
+    """One signature of a request, kept until it is made; its question has not been asked yet."""
+    place = _place(position)
+    return PendingSignature(request_id, signer.config.id, place.page, place.box, place.field_name, status, signer.config.owner, None)
+
+
+def _deliver(inbox: Inbox, client, message_id: str, recipient: str, signed: bytes, filename: str | None) -> None:
+    # A disruption during sending leaves an uncertain state; do not retry automatically.
+    inbox.set_state(message_id, "sending")
+    client.send_pdf(recipient, signed, filename)
+    inbox.set_state(message_id, "sent")
+
+
 def _write_pending(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
@@ -304,7 +317,7 @@ def _discard(inbox: Inbox, runtime: Runtime, request_id: str) -> None:
 
 
 def _finish(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: Runtime, request_id: str,
-            failure: "SignerFailed | None" = None) -> None:
+            failure: SignerFailed | None = None) -> None:
     """Report progress; once nobody is left to confirm, deliver the result.
 
     A signature that has just failed is reported with the name of its signer and the reason.
@@ -322,10 +335,7 @@ def _finish(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: 
             _note(inbox, requester, "progress", record.filename, signed=signed, waiting=waiting)
         return
     if signed:
-        # A disruption during sending leaves an uncertain state; do not retry automatically.
-        inbox.set_state(record.message_id, "sending")
-        client.send_pdf(requester, runtime.pending_file(request_id).read_bytes(), record.filename)
-        inbox.set_state(record.message_id, "sent")
+        _deliver(inbox, client, record.message_id, requester, runtime.pending_file(request_id).read_bytes(), record.filename)
         if failure is not None:
             _note(inbox, requester, "partial_problem", record.filename, signed=signed, **failure.values)
         elif missing:
@@ -364,18 +374,17 @@ def expire_requests(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
 
 def _await_confirmations(inbox: Inbox, client, signers, runtime: Runtime, job: Job, document: bytes, planned) -> None:
     """Sign for trusted requesters now and put the other signatures in line for their owners' approval."""
-    request_id = uuid4().hex[:12]
+    request_id = _new_request()
     current = document
     entries = []
     for signer, position in planned:
-        base = (request_id, signer.config.id, position.page, tuple(position.box), getattr(position, "field_name", None))
         if signer.config.needs_confirmation(job.sender):
-            entries.append(PendingSignature(*base, "pending", signer.config.owner, None))
+            entries.append(_entry(request_id, signer, position, "pending"))
         else:
-            signed = _sign_one(current, _request(signer, position))
+            signed = _sign_as(current, signer, position)
             _audit(runtime, signer, request_id=request_id, requester=job.sender, confirmed_by=None, before=current, after=signed)
             current = signed
-            entries.append(PendingSignature(*base, "signed", signer.config.owner, None))
+            entries.append(_entry(request_id, signer, position, "signed"))
     owners = list(dict.fromkeys(entry.owner for entry in entries if entry.status == "pending"))
     # Requests of other people that each owner has to answer before this one.
     ahead = sum(1 for owner in owners for waiting in {entry.request_id for entry in inbox.pending_for_owner(owner)}
@@ -587,7 +596,7 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
             inbox.set_state(message_id, "needs_review")
             _note(inbox, sender, "no_location", filename, names=", ".join(s.config.name for s in (referenced or authorized)))
             return
-        if _overlapping([position for _, position in located]):
+        if overlapping([position for _, position in located]):
             raise ValueError("Signature areas overlap.")
         if len(located) == 1 and not unplaced and not located[0][0].config.needs_confirmation(sender):
             _proceed(inbox, client, signers, runtime, job, document, located)
@@ -630,11 +639,8 @@ def _proceed(inbox: Inbox, client, signers, runtime: Runtime, job: Job, document
                 raise
             raise SignerFailed(planned[exc.request_index][0], exc) from exc
     for signer, _ in planned:
-        _audit(runtime, signer, request_id=uuid4().hex[:12], requester=job.sender, confirmed_by=None, before=document, after=signed)
-    # A disruption during sending leaves an uncertain state; do not retry automatically.
-    inbox.set_state(job.message_id, "sending")
-    client.send_pdf(job.sender, signed, job.filename)
-    inbox.set_state(job.message_id, "sent")
+        _audit(runtime, signer, request_id=_new_request(), requester=job.sender, confirmed_by=None, before=document, after=signed)
+    _deliver(inbox, client, job.message_id, job.sender, signed, job.filename)
     _note(inbox, job.sender, "signed_by", job.filename, signed=", ".join(signer.config.name for signer, _ in planned))
 
 
@@ -644,9 +650,8 @@ def _offer_choice(inbox: Inbox, client, runtime: Runtime, job: Job, document: by
     Nothing reaches a certificate owner until the requester has answered. The
     question is asked when it is its turn, together with the ones that are alike.
     """
-    request_id = uuid4().hex[:12]
-    entries = [PendingSignature(request_id, signer.config.id, position.page, tuple(position.box), getattr(position, "field_name", None),
-                                "offered", signer.config.owner, None) for signer, position in located]
+    request_id = _new_request()
+    entries = [_entry(request_id, signer, position, "offered") for signer, position in located]
     language = runtime.language(job.sender)
     if len(located) == 1 and not unplaced:
         question = text(language, "ask_owner", name=located[0][0].config.name, minutes=runtime.confirmation_minutes,

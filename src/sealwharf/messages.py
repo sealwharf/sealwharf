@@ -63,10 +63,8 @@ def check_catalog(catalog: Catalog, reference: Catalog) -> None:
     problems += [f"empty message {key}" for key, value in catalog.messages.items() if not value.strip()]
     if set(catalog.phrases) != set(PHRASE_KINDS) or not all(catalog.phrases.values()):
         problems.append("phrases must list at least one entry for each of: " + ", ".join(PHRASE_KINDS))
-    if set(catalog.replies) != set(reference.replies) or any(
-            len(catalog.replies.get(kind, ())) != len(replies) or len(set(catalog.replies.get(kind, ()))) != len(replies)
-            for kind, replies in reference.replies.items()):
-        problems.append("replies must have as many different entries as the reference catalog")
+    if set(catalog.replies) != set(reference.replies) or not all(catalog.replies.values()):
+        problems.append("replies must list at least one entry for each of: " + ", ".join(sorted(reference.replies)))
     if problems:
         raise RuntimeError(f"Language file {catalog.code}.toml is incomplete: " + "; ".join(sorted(problems)) + ".")
 
@@ -129,7 +127,7 @@ def phrase_kind(written: object, kinds: tuple[str, ...] = PHRASE_KINDS) -> str |
 
 
 def wake_reply(language: str) -> str:
-    """Return one of the answers to the wake phrase, in the requested language."""
+    """Return one of the answers to the wake phrase, picked at random, in the requested language."""
     return random.choice(_catalog(language).replies["wake"])
 
 

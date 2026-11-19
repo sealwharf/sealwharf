@@ -183,6 +183,16 @@ class SignaturePosition:
     field_name: str | None = None
 
 
+def overlapping(positions) -> bool:
+    """Whether any two signature areas share space on the same page."""
+    for index, first in enumerate(positions):
+        for second in positions[:index]:
+            if first.page == second.page and not (first.box[2] <= second.box[0] or second.box[2] <= first.box[0]
+                                                  or first.box[3] <= second.box[1] or second.box[3] <= first.box[1]):
+                return True
+    return False
+
+
 @dataclass(frozen=True)
 class SigningRequest:
     certificate: Path | None
@@ -199,15 +209,8 @@ def sign_pdf_sequence(document: bytes, requests: tuple[SigningRequest, ...]) -> 
     """Apply all requested signatures in memory and verify them in the final PDF."""
     if not requests:
         raise SigningError("At least one signature is required.")
-    for index, request in enumerate(requests):
-        first = request.position
-        for other in requests[:index]:
-            second = other.position
-            if first.page == second.page and not (
-                first.box[2] <= second.box[0] or second.box[2] <= first.box[0]
-                or first.box[3] <= second.box[1] or second.box[3] <= first.box[1]
-            ):
-                raise SigningError("Signature areas overlap.")
+    if overlapping([request.position for request in requests]):
+        raise SigningError("Signature areas overlap.")
     try:
         known = {signature.field_name for signature in PdfFileReader(BytesIO(document)).embedded_signatures}
         added = set()

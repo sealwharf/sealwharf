@@ -20,6 +20,13 @@ SECRET_FILE = re.compile(r"\.(p12|pfx|pem|key|jks|keystore)$", re.IGNORECASE)
 ANSWERS = {"yes": "1", "no": "0", "all": "all"}
 # A command, not a phrase of a language: it is written the same way by everyone, and answered in the reader's language.
 STATUS_COMMANDS = frozenset({"bot status", "botstatus"})
+# A document in one of these states waits for somebody's answer.
+AWAITING = "('awaiting_choice', 'awaiting_confirmation')"
+
+
+def _question_kind(status: str) -> str:
+    """An offered signature waits for the requester's choice; a pending one for its owner's approval."""
+    return "choice" if status == "offered" else "approval"
 
 
 class Job(NamedTuple):
@@ -210,7 +217,7 @@ class Inbox:
     def documents_waiting(self) -> int:
         """Count the documents that wait for somebody's answer."""
         with self.connect() as db:
-            return db.execute("SELECT COUNT(*) FROM jobs WHERE state IN ('awaiting_choice', 'awaiting_confirmation')").fetchone()[0]
+            return db.execute(f"SELECT COUNT(*) FROM jobs WHERE state IN {AWAITING}").fetchone()[0]
 
     def mark_document(self, message_id: str, sender: str, digest: str) -> bool:
         """Record what a document is; return True when the same number already has that same file in hand.
@@ -220,8 +227,7 @@ class Inbox:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             repeated = db.execute(
-                "SELECT 1 FROM jobs WHERE sender=? AND digest=? AND message_id<>? "
-                "AND state IN ('awaiting_choice', 'awaiting_confirmation') LIMIT 1",
+                f"SELECT 1 FROM jobs WHERE sender=? AND digest=? AND message_id<>? AND state IN {AWAITING} LIMIT 1",
                 (sender, digest, message_id)).fetchone() is not None
             db.execute("UPDATE jobs SET digest=? WHERE message_id=?", (None if repeated else digest, message_id))
         return repeated
@@ -303,7 +309,7 @@ class Inbox:
         if not rows:
             return None
         status = rows[-1][0]
-        return ("choice" if status == "offered" else "approval", [row[1] for row in rows if row[0] == status])
+        return (_question_kind(status), [row[1] for row in rows if row[0] == status])
 
     def waiting_questions(self) -> list[tuple[str, str, str, str, str | None]]:
         """Questions not asked yet, oldest first: (number to ask, kind, request, requester, question text)."""
@@ -313,7 +319,7 @@ class Inbox:
                 "r.requester, r.question, r.created_at, r.rowid FROM requests r "
                 "JOIN request_signers s ON s.request_id = r.request_id "
                 "WHERE s.expires_at IS NULL AND s.status IN ('offered', 'pending') ORDER BY r.created_at, r.rowid").fetchall()
-        return [(row[0], "choice" if row[1] == "offered" else "approval", row[2], row[3], row[4]) for row in rows]
+        return [(row[0], _question_kind(row[1]), row[2], row[3], row[4]) for row in rows]
 
     def ask(self, request_id: str, kind: str, number: str, expires_at: float) -> None:
         """Start the clock of a question at the moment it is asked."""

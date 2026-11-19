@@ -109,7 +109,7 @@ Anything else you write is ignored, so the number can still be used for ordinary
 
 Both commands work only for the numbers in `contacts`, and only when the message is exactly the command. Capital letters do not matter, and the words may be written together (`wakeupbot`, `botstatus`). A message that merely resembles a command, such as `wake up bot!` or `status`, gets no answer.
 
-**`wake up bot`** is the quick test that the bot is alive. It answers with one of twenty-five lines, picked at random, in whatever mood it happens to be: sleepy, eager, grumpy, dramatic or sarcastic. For example:
+**`wake up bot`** is the quick test that the bot is alive. It answers with a line picked at random, in whatever mood it happens to be: sleepy, eager, grumpy, dramatic or sarcastic. For example:
 
 > Zzz... sign here... zzz... oh! Hi. I'm awake.
 

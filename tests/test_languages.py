@@ -31,7 +31,7 @@ def test_each_language_is_complete(code):
     catalog = CATALOGS[code]
     check_catalog(catalog, REFERENCE)
     assert set(catalog.phrases) == set(PHRASE_KINDS) and all(catalog.phrases.values())
-    assert len(catalog.replies["wake"]) == len(set(catalog.replies["wake"])) == 25
+    assert catalog.replies["wake"]
     # Every message can be written out with its placeholders filled in.
     for key in catalog.messages:
         filled = text(code, key, **dict.fromkeys(
@@ -63,8 +63,8 @@ def test_an_incomplete_language_is_refused():
         catalog(messages=REFERENCE.messages | {"approved": " "}),
         catalog(phrases={kind: values for kind, values in REFERENCE.phrases.items() if kind != "wake"}),
         catalog(phrases=REFERENCE.phrases | {"yes": frozenset()}),
-        catalog(replies={"wake": REFERENCE.replies["wake"][:3]}),
-        catalog(replies={"wake": REFERENCE.replies["wake"][:24] + REFERENCE.replies["wake"][:1]}),
+        catalog(replies={"wake": ()}),
+        catalog(replies={}),
     ]
     for candidate in broken:
         with pytest.raises(RuntimeError, match="xx.toml is incomplete"):
