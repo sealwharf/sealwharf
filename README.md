@@ -490,7 +490,7 @@ Signatures in the last 7 day(s): 2. Times in UTC.
 2026-11-20 09:41 · John Doe · asked by John Doe · own certificate · file 77ab01ce
 ```
 
-The times are those of the server's time zone. To choose another one, add a line such as `timezone: America/Sao_Paulo` to the configuration; the answer then says `Times in UTC-03:00`.
+The times are those of the server's time zone. To choose another one, add a line such as `timezone: Asia/Tokyo` to the configuration; the answer then says `Times in UTC+09:00`.
 
 Add a period to look further back or closer: a number followed by `h` (hours) or `d` (days), such as `bot log 12h` or `bot log 30d`. The command is written the same way in every language, and at most the 30 latest signatures are shown. The last item of each line is the start of the SHA-256 fingerprint of the signed file, which tells one document from another without naming it.
 

@@ -140,8 +140,8 @@ def test_the_time_zone_is_optional_and_must_exist(tmp_path):
             '    file: certificate.p12\n    password: "synthetic"\n    owner: jane\n')
     config.write_text(body, encoding="utf-8")
     assert load_config(config).timezone is None
-    config.write_text(body + "timezone: America/Sao_Paulo\n", encoding="utf-8")
-    assert load_config(config).timezone == "America/Sao_Paulo"
+    config.write_text(body + "timezone: Asia/Tokyo\n", encoding="utf-8")
+    assert load_config(config).timezone == "Asia/Tokyo"
     for unknown in ("Mars/Olympus", "3", "''"):
         config.write_text(body + f"timezone: {unknown}\n", encoding="utf-8")
         with pytest.raises(ValueError, match="timezone must be the name of a time zone"):

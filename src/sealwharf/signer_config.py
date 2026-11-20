@@ -80,7 +80,7 @@ class AppConfig:
     request_limits: dict[str, int] = field(default_factory=dict)
     # How many days the record of signatures is kept.
     log_days: int = 90
-    # The time zone of the times people read, such as America/Sao_Paulo; None for the time zone of the server.
+    # The time zone of the times people read, such as Asia/Tokyo; None for the time zone of the server.
     timezone: str | None = None
     # The WhatsApp gateway: which adapter talks to it and, for one you host, where it is and its session name.
     gateway_url: str | None = None
@@ -162,7 +162,7 @@ def load_config(path: Path) -> AppConfig:
         try:
             ZoneInfo(timezone)
         except (TypeError, ValueError, OSError, ZoneInfoNotFoundError):
-            raise ValueError("timezone must be the name of a time zone, such as America/Sao_Paulo.") from None
+            raise ValueError("timezone must be the name of a time zone, such as Asia/Tokyo.") from None
     return AppConfig(signers, languages, contact_names, per_hour, minutes, public_url, gateway_token, tokens["tunnel_token"],
                      request_limits, gateway_url=gateway_url, gateway_type=gateway_type, gateway_session=gateway_session,
                      log_days=log_days, timezone=timezone)

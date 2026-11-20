@@ -756,10 +756,10 @@ def test_bot_log_shows_each_person_only_the_signatures_they_took_part_in(world):
         "Firmas en el período de 30 día(s): 2. Horas en UTC.")
     # Times are written in the configured time zone.
     recorded = datetime.fromisoformat(world.audit.entries()[0]["time"])
-    brazil = log_report(world.audit, world.signers, OWNER_A, "pt-br", world.runtime.called, 168,
-                        zone=Runtime(world.runtime.data_dir, timezone="America/Sao_Paulo").zone).splitlines()
-    assert brazil[0] == "Assinaturas no período de 7 dia(s): 2. Horários em UTC-03:00."
-    assert brazil[1].startswith((recorded - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M") + " · Alice Example")
+    tokyo = log_report(world.audit, world.signers, OWNER_A, "pt-br", world.runtime.called, 168,
+                        zone=Runtime(world.runtime.data_dir, timezone="Asia/Tokyo").zone).splitlines()
+    assert tokyo[0] == "Assinaturas no período de 7 dia(s): 2. Horários em UTC+09:00."
+    assert tokyo[1].startswith((recorded + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M") + " · Alice Example")
     assert Runtime(world.runtime.data_dir).zone is None
     # A period longer than the record is kept is shortened to it.
     short = Runtime(world.runtime.data_dir, names=dict(PEOPLE), log_days=2, timezone="UTC")
