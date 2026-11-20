@@ -26,6 +26,8 @@ def test_download_fixed_host_and_send():
     client.send_text("5511999999999", "Review needed")
     assert [str(r.url) for r in requests] == ["https://gate.whapi.cloud/media/pdf-abc123", "https://gate.whapi.cloud/messages/document", "https://gate.whapi.cloud/messages/text"]
     assert b"Report 004 - signed.pdf" in requests[1].content
+    Whapi("token", httpx.MockTransport(handler), url="http://bridge.example:8787").send_text("5511999999999", "Review needed")
+    assert str(requests[-1].url) == "http://bridge.example:8787/messages/text"
 
 
 @pytest.mark.parametrize(("original", "expected"), [

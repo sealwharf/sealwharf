@@ -941,6 +941,9 @@ def test_configuration_defines_contacts_roles_tokens_and_languages(config_file):
     assert signer.needs_confirmation("5511900000010") and signer.password == "0123"
     # Secrets never show up when the configuration is printed.
     assert "secret" not in repr(config) and "0123" not in repr(config)
+    assert config.whapi_url == "https://gate.whapi.cloud"
+    config_file.write_text("whapi_url: http://host.docker.internal:8787\n" + CONTACTS + CERTIFICATE, encoding="utf-8")
+    assert load_config(config_file).whapi_url == "http://host.docker.internal:8787"
     config_file.write_text("language: pt-br\n" + CONTACTS + CERTIFICATE, encoding="utf-8")
     assert load_config(config_file).languages == {"5511900000001": "en", "5511900000010": "pt-br", "5511900000011": "pt-br"}
 
@@ -967,6 +970,8 @@ def test_one_contact_can_be_used_by_several_certificates(config_file):
     "language: fr\n" + CONTACTS + CERTIFICATE,
     CONTACTS + CERTIFICATE + "limits:\n  confirmation_minutes: 0\n",
     "whapi_token: has space\n" + CONTACTS + CERTIFICATE,
+    "whapi_url: http://bridge.example/path\n" + CONTACTS + CERTIFICATE,
+    "whapi_url: http://user:secret@bridge.example\n" + CONTACTS + CERTIFICATE,
     "tunnel_token: 12345\n" + CONTACTS + CERTIFICATE,
     "public_url: http://bot.example.com\n" + CONTACTS + CERTIFICATE,
 ])

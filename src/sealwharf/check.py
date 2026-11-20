@@ -34,7 +34,7 @@ def check(*, channel=check_channel, output=print) -> bool:
             problems += 1
     if config.whapi_token is not None:
         try:
-            channel(config.whapi_token)
+            channel(config.whapi_token, url=config.whapi_url)
             output("ok       Whapi channel is connected")
         except ValueError as exc:
             output(f"PROBLEM  {exc}")

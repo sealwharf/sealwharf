@@ -37,6 +37,8 @@ Cloudflare shows a command to install a program. **Do not install anything.** Ju
 
 In the Whapi dashboard, open your channel and copy its **API token**. The channel must be connected (QR code scanned).
 
+If you run a Whapi-compatible service of your own instead of Whapi.Cloud, use its token here and add its address to the configuration in step 4, in a line such as `whapi_url: http://host.docker.internal:8787`.
+
 ### 4. Fill in the configuration
 
 Create a folder named `certificates` inside `config/` and copy your certificate file into it. Then make a copy of `config/sealwharf.example.yaml` named `config/sealwharf.yaml` and fill it in. This is the smallest working file:

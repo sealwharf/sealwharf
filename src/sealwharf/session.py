@@ -110,7 +110,7 @@ def main() -> None:
     model = LocalModelSession()
     # A short pause between messages keeps a large batch from looking like a flood to WhatsApp.
     db_path = data / "inbox.db"
-    client = Whapi(config.whapi_token, addresses=Inbox(db_path), pace=1.0)
+    client = Whapi(config.whapi_token, addresses=Inbox(db_path), pace=1.0, url=config.whapi_url)
     worker_lock = WorkerLock.for_database(db_path)
     stage = "acquiring the worker lock"
     try:

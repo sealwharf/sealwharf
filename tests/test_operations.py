@@ -51,15 +51,15 @@ def project(tmp_path, monkeypatch):
     return write
 
 
-def run_check(channel=lambda token: None):
+def run_check(channel=lambda token, url: None):
     lines = []
     return check(channel=channel, output=lines.append), "\n".join(lines)
 
 
 def test_check_confirms_a_working_configuration_without_printing_secrets(project):
     seen = []
-    ready, report = run_check(seen.append)
-    assert ready and seen == ["whapi-secret"]
+    ready, report = run_check(lambda token, url: seen.append((token, url)))
+    assert ready and seen == [("whapi-secret", "https://gate.whapi.cloud")]
     assert "certificate john: opens and matches its name" in report and "Whapi channel is connected" in report
     assert report.endswith("Ready to start.")
     for secret in ("correct horse", "whapi-secret", "tunnel-secret"):
@@ -81,7 +81,7 @@ def test_check_lists_every_problem_at_once(project):
 def test_check_reports_name_mismatch_channel_failure_and_unreadable_file(project):
     project(name="Jane Doe")
 
-    def refused(token):
+    def refused(token, url):
         raise ValueError("The Whapi channel is not connected. Connect it in the Whapi dashboard.")
     ready, report = run_check(refused)
     assert not ready and "does not match certificate john" in report and "channel is not connected" in report

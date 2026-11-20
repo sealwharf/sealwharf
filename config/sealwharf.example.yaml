@@ -4,6 +4,7 @@
 
 public_url: https://bot.example.com # the public hostname of your Cloudflare tunnel
 whapi_token: "paste-the-channel-token"
+# whapi_url: http://host.docker.internal:8787  # only when a Whapi-compatible service of your own replaces Whapi.Cloud
 tunnel_token: "paste-the-cloudflare-tunnel-token"
 language: en                        # en, pt-br or es; used for contacts that set no lang of their own
 

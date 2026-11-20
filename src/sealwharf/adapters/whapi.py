@@ -1,4 +1,4 @@
-"""Whapi operations with a fixed host and transfer limits."""
+"""Whapi operations with one configured host and transfer limits."""
 
 import re
 import time
@@ -8,6 +8,7 @@ import httpx
 
 from ..documents.validation import MAX_PDF_BYTES, DocumentError, validate_pdf
 
+WHAPI_URL = "https://gate.whapi.cloud"
 MEDIA_ID = re.compile(r"^[A-Za-z0-9]+-[0-9a-fA-F-]+$")
 
 
@@ -23,11 +24,11 @@ def signed_filename(original: str | None, suffix: str = " - signed") -> str:
     return f"{name.strip(' .')[:200] or 'document'}{suffix}.pdf"
 
 
-def check_channel(token: str, transport: httpx.BaseTransport | None = None) -> None:
+def check_channel(token: str, transport: httpx.BaseTransport | None = None, url: str = WHAPI_URL) -> None:
     """Raise ValueError unless the token is valid and its channel is connected to WhatsApp."""
     failure = "The Whapi token was refused or Whapi could not be reached."
     try:
-        with httpx.Client(base_url="https://gate.whapi.cloud", headers={"Authorization": f"Bearer {token}"},
+        with httpx.Client(base_url=url, headers={"Authorization": f"Bearer {token}"},
                           timeout=15, follow_redirects=False, transport=transport) as client:
             response = client.get("/health", params={"wakeup": "false"})
             response.raise_for_status()
@@ -41,13 +42,14 @@ def check_channel(token: str, transport: httpx.BaseTransport | None = None) -> N
 
 
 class Whapi:
-    def __init__(self, token: str, transport: httpx.BaseTransport | None = None, addresses=None, pace: float = 0.0):
+    def __init__(self, token: str, transport: httpx.BaseTransport | None = None, addresses=None, pace: float = 0.0,
+                 url: str = WHAPI_URL):
         # `addresses` remembers how WhatsApp identifies each configured number (the inbox does this).
         # `pace` is the least time, in seconds, between two messages sent.
         self.addresses = addresses
         self.pace = pace
         self._last_sent = 0.0
-        self.client = httpx.Client(base_url="https://gate.whapi.cloud", headers={"Authorization": f"Bearer {token}"},
+        self.client = httpx.Client(base_url=url, headers={"Authorization": f"Bearer {token}"},
                                    timeout=httpx.Timeout(30, connect=10), follow_redirects=False, transport=transport)
 
     def resolve(self, number: str) -> str:
