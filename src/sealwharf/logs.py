@@ -22,7 +22,7 @@ def main() -> None:
     for entry in entries:
         print(entry["time"], entry.get("event"), f"certificate={entry.get('certificate_id')}", f"requester={entry.get('requester')}",
               f"approval={entry.get('approval')}", f"confirmed_by={entry.get('confirmed_by') or '-'}",
-              f"file={(entry.get('signed_sha256') or '')[:8]}")
+              f"sha256={(entry.get('signed_sha256') or '')[:8]}", f"file={entry.get('filename') or '-'}")
     print(f"{len(entries)} signature(s) in the last {arguments.period}.")
 
 

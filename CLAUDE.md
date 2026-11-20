@@ -84,8 +84,9 @@ docker build -t sealwharf:local .
   languages. The exception is the commands (`bot status`, `bot log`,
   `bot help`), written the same way by everyone and kept in
   `adapters/inbox.py`; only their answers are translated.
-- Nothing about a finished document is kept: its copy, file name and
-  fingerprint are erased when it is done, and its queue entry within an hour.
+- A finished document leaves only its entry in the record of signatures
+  (file name and fingerprints, never content): its copy and the details in the
+  queue are erased when it is done, and its queue entry within an hour.
   New stored state needs an erasing path, and `purge` must remove it.
 - Through the chat a person reads only the log entries they asked for,
   approved, or that used a certificate they own (`application/history.py`).

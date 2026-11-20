@@ -189,7 +189,7 @@ def test_owner_signs_own_document_directly_and_it_is_audited(world):
     assert (entry["approval"], entry["requester"], entry["confirmed_by"], entry["certificate_id"]) == ("owner", OWNER_A, None, "alice")
     assert entry["document_sha256"] == hashlib.sha256(document).hexdigest()
     assert entry["signed_sha256"] == hashlib.sha256(signed).hexdigest()
-    assert "Alice" not in str(entry) and "report" not in str(entry)
+    assert "Alice" not in str(entry) and entry["filename"] == "report.pdf"
 
 
 def test_certificate_of_another_person_is_never_used(world):
@@ -729,11 +729,10 @@ def test_bot_status_lists_the_certificates_with_their_expiry_dates(world):
 
 
 def test_bot_log_shows_each_person_only_the_signatures_they_took_part_in(world):
-    world.send(PREPARER, make_pdf("Alice Example", "one"))
+    world.send(PREPARER, make_pdf("Alice Example", "one"), filename="contract.pdf")
     world.send(OWNER_A, text="1")
-    world.send(TRUSTED, make_pdf("Alice Example", "two"))
+    world.send(TRUSTED, make_pdf("Alice Example", "two"), filename="a letter\nwith a very long name " + "x" * 60 + ".docx")
     world.send(OWNER_B, make_pdf("Bruno Example"))
-    files = [hashlib.sha256(data).hexdigest()[:8] for _, data, _ in world.chat.files]
 
     def log(number, command="bot log"):
         world.send(number, text=command)
@@ -741,13 +740,17 @@ def test_bot_log_shows_each_person_only_the_signatures_they_took_part_in(world):
     # The owner sees what was done with the certificate, whoever asked.
     owner = log(OWNER_A)
     assert owner[0] == "Signatures in the last 7 day(s): 2. Times in UTC." and len(owner) == 3
-    assert owner[1].endswith(f" · Alice Example · asked by Paulo Preparer · approved by Ana · file {files[0]}")
-    assert owner[2].endswith(f" · Alice Example · asked by {format_number(TRUSTED)} · trusted contact · file {files[1]}")
+    assert owner[1].endswith(" · contract.pdf · Alice Example · asked by Paulo Preparer · approved by Ana")
+    long_name = "a letter with a very long name " + "x" * 26 + "..."
+    assert owner[2].endswith(f" · {long_name} · Alice Example · asked by {format_number(TRUSTED)} · trusted contact")
     # Whoever asked sees their own requests; nobody sees the signatures of other people.
     assert log(PREPARER, "Bot Log 12h")[0] == "Signatures in the last 12 hour(s): 1. Times in UTC."
-    assert log(OWNER_B, "botlog 30d")[1].endswith(f" · Bruno Example · asked by {format_number(OWNER_B)} · own certificate · file {files[2]}")
+    assert log(OWNER_B, "botlog 30d")[1].endswith(f" · report.pdf · Bruno Example · asked by {format_number(OWNER_B)} · own certificate")
     assert log(OWNER_C) == ["No signatures of yours in the last 7 day(s)."]
     assert all("Bruno Example" not in line for line in owner) and len(world.audit.entries()) == 3
+    # An entry made before file names were recorded shows the start of the fingerprint of the signed file.
+    world.audit.record(event="signed", certificate_id="carla", requester=OWNER_C, approval="owner", signed_sha256="abcdef0123456789")
+    assert log(OWNER_C)[1].endswith(f" · abcdef01 · Carla Example · asked by {world.runtime.called(OWNER_C)} · own certificate")
     # The time filter, and the language of whoever asks.
     later = datetime.now(UTC) + timedelta(days=8)
     assert log_report(world.audit, world.signers, OWNER_A, "pt-br", world.runtime.called, 168, now=later) == (
@@ -759,7 +762,7 @@ def test_bot_log_shows_each_person_only_the_signatures_they_took_part_in(world):
     tokyo = log_report(world.audit, world.signers, OWNER_A, "pt-br", world.runtime.called, 168,
                         zone=Runtime(world.runtime.data_dir, timezone="Asia/Tokyo").zone).splitlines()
     assert tokyo[0] == "Assinaturas no período de 7 dia(s): 2. Horários em UTC+09:00."
-    assert tokyo[1].startswith((recorded + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M") + " · Alice Example")
+    assert tokyo[1].startswith((recorded + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M") + " · contract.pdf · Alice Example")
     assert Runtime(world.runtime.data_dir).zone is None
     # A period longer than the record is kept is shortened to it.
     short = Runtime(world.runtime.data_dir, names=dict(PEOPLE), log_days=2, timezone="UTC")

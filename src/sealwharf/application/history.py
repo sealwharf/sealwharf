@@ -43,11 +43,13 @@ def log_report(audit: AuditLog, signers: tuple[UnlockedSigner, ...], number: str
     lines = [text(language, "log_header", period=period, count=len(entries), zone=_zone_name(moment.astimezone(zone)))]
     for entry in entries[-MAX_LINES:]:
         approval = entry.get("approval")
+        # An entry made before file names were recorded is told apart by the fingerprint of the signed file.
+        name = entry.get("filename") or (entry.get("signed_sha256") or "")[:8]
         how = (text(language, "log_confirmed", owner=called(entry["confirmed_by"])) if approval == "confirmed"
                else text(language, {"owner": "log_own", "autotrust": "log_autotrust"}.get(approval, "log_trusted")))
         lines.append(text(language, "log_line", when=datetime.fromisoformat(entry["time"]).astimezone(zone).strftime("%Y-%m-%d %H:%M"),
                           name=names.get(entry.get("certificate_id"), entry.get("certificate_id")),
-                          requester=called(entry["requester"]), approval=how, fingerprint=(entry.get("signed_sha256") or "")[:8]))
+                          requester=called(entry["requester"]), approval=how, file=name if len(name) <= 60 else name[:57] + "..."))
     if len(entries) > MAX_LINES:
         lines.append(text(language, "log_more", shown=MAX_LINES))
     return "\n".join(lines)

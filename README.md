@@ -454,13 +454,13 @@ To get exactly the same result as on your computer, do one of these:
 
 - **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact messages `wake up bot` (or its Portuguese or Spanish form) and the commands `bot status`, `bot log` and `bot help` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
 - **Privacy.** Documents and certificates are processed on your computer. The gateway and Cloudflare only carry the messages. Certificates and passwords are never accepted through the chat: a `.p12` file sent to the bot is refused without being opened.
-- **Record of signatures.** Every signature is recorded with the time, who asked, who approved and the fingerprint of the document. The section "Logs" below tells who may read it and for how long it is kept.
+- **Record of signatures.** Every signature is recorded with the time, the name of the file, who asked, who approved and the fingerprint of the document. The section "Logs" below tells who may read it and for how long it is kept.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.
 - **Expiring certificates.** From 30 days before a certificate expires, its owner gets a daily reminder.
 - **Limits.** Each number may send 20 documents per hour, and a question stays open for 5 minutes. Both can be changed under `limits` in the configuration. For someone who sends documents in bulk, add `limit: 200` (documents per hour) to that person in `contacts`.
 - **Large batches take a moment.** Documents are signed one after the other, and the bot leaves a second between its messages so that WhatsApp does not take them for spam.
 - **Signed documents can be signed again.** Send a PDF that already has signatures to add another signer; the earlier signatures stay valid.
-- **What the bot keeps.** As little as it can. A document is held only while it is being signed or waits for an answer; after that its copy and its file name are erased at once, and the bare entry in the queue is gone within an hour. What stays in the `data` volume is the record of signatures, a copy of each version of your configuration with every secret removed, and the token driver.
+- **What the bot keeps.** As little as it can. A document is held only while it is being signed or waits for an answer; after that its copy is erased at once, and its entry in the queue is gone within an hour. What stays in the `data` volume is the record of signatures, which holds the name of each signed file but never its content, a copy of each version of your configuration with every secret removed, and the token driver.
 - **Erasing everything.** To leave nothing behind, stop the bot and run the `purge` command. It erases the queue, the documents still awaiting approval, the record of signatures and the configuration copies:
 
   ```bash
@@ -480,20 +480,20 @@ The bot keeps two kinds of log, and each has its own rule.
 
 | Log | What it holds | Who reads it | How long it is kept |
 | --- | --- | --- | --- |
-| Record of signatures | For each signature: the time, the certificate, who asked, who approved and the fingerprint of the document. Never the name or the content of a document. | Each person, through the chat, reads only their own part. Whoever runs the bot reads all of it. | 90 days, then it is erased. Change it with `log_days` under `limits`. |
+| Record of signatures | For each signature: the time, the name of the file, the certificate, who asked, who approved and the fingerprint of the document. Never the content of a document. | Each person, through the chat, reads only their own part. Whoever runs the bot reads all of it. | 90 days, then it is erased. Change it with `log_days` under `limits`. |
 | Operational log | What the bot is doing: started, signed, a question expired. No phone numbers, names or file names. | Whoever runs the bot, with `docker compose logs sealwharf`. | Until the container is created again. |
 
 **Reading your own log in the chat.** Send `bot log` to the bot. It answers with the signatures of the last 7 days that you asked for, that you approved, or that were made with a certificate you own. Nobody sees the signatures of other people.
 
 ```text
 Signatures in the last 7 day(s): 2. Times in UTC.
-2026-11-19 14:02 · John Doe · asked by Jane Doe · approved by John Doe · file 3fa9c1d2
-2026-11-20 09:41 · John Doe · asked by John Doe · own certificate · file 77ab01ce
+2026-11-19 14:02 · contract.pdf · John Doe · asked by Jane Doe · approved by John Doe
+2026-11-20 09:41 · report.docx · John Doe · asked by John Doe · own certificate
 ```
 
 The times are those of the server's time zone. To choose another one, add a line such as `timezone: Asia/Tokyo` to the configuration; the answer then says `Times in UTC+09:00`.
 
-Add a period to look further back or closer: a number followed by `h` (hours) or `d` (days), such as `bot log 12h` or `bot log 30d`. The command is written the same way in every language, and at most the 30 latest signatures are shown. The last item of each line is the start of the SHA-256 fingerprint of the signed file, which tells one document from another without naming it.
+Add a period to look further back or closer: a number followed by `h` (hours) or `d` (days), such as `bot log 12h` or `bot log 30d`. The command is written the same way in every language, and at most the 30 latest signatures are shown. Each line shows the name of the file as it was sent; nobody gets the document itself from the log.
 
 **Reading the whole record.** Whoever runs the bot can read every entry, with the same kind of period and two optional filters:
 

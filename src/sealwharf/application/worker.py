@@ -285,7 +285,7 @@ def _digest(data: bytes) -> str:
 
 
 def _audit(runtime: Runtime, signer: UnlockedSigner, *, request_id: str, requester: str, confirmed_by: str | None,
-           before: bytes, after: bytes) -> None:
+           before: bytes, after: bytes, filename: str | None) -> None:
     if confirmed_by is not None:
         approval = "confirmed"
     elif signer.config.owner is None:
@@ -295,7 +295,9 @@ def _audit(runtime: Runtime, signer: UnlockedSigner, *, request_id: str, request
     runtime.audit.record(event="signed", request_id=request_id, certificate_id=signer.config.id,
                          certificate_sha256=signer.certificate_fingerprint.hex(), requester=requester,
                          confirmed_by=confirmed_by, approval=approval,
-                         document_sha256=_digest(before), signed_sha256=_digest(after))
+                         document_sha256=_digest(before), signed_sha256=_digest(after),
+                         # The name as it was sent, on one line, so people recognize the document in their log.
+                         filename=" ".join((filename or "").split())[:200] or None)
     operational_logger().info("signed request=%s certificate=%s approval=%s", request_id, signer.config.id, approval)
 
 
@@ -410,7 +412,8 @@ def _await_confirmations(inbox: Inbox, client, signers, runtime: Runtime, job: J
             entries.append(_entry(request_id, signer, position, "pending"))
         else:
             signed = _sign_as(current, signer, position)
-            _audit(runtime, signer, request_id=request_id, requester=job.sender, confirmed_by=None, before=current, after=signed)
+            _audit(runtime, signer, request_id=request_id, requester=job.sender, confirmed_by=None, before=current, after=signed,
+                   filename=job.filename)
             current = signed
             entries.append(_entry(request_id, signer, position, "signed"))
     owners = list(dict.fromkeys(entry.owner for entry in entries if entry.status == "pending"))
@@ -555,7 +558,8 @@ def _approve_one(inbox: Inbox, client, signers, runtime: Runtime, owner: str, re
     else:
         for signer, before, after in steps:
             inbox.set_signature_status(request_id, signer.config.id, "signed")
-            _audit(runtime, signer, request_id=request_id, requester=record.requester, confirmed_by=owner, before=before, after=after)
+            _audit(runtime, signer, request_id=request_id, requester=record.requester, confirmed_by=owner, before=before, after=after,
+                   filename=record.filename)
         _note(inbox, owner, "approved", record.filename)
     _finish(inbox, client, signers, runtime, request_id, failure)
 
@@ -674,7 +678,8 @@ def _proceed(inbox: Inbox, client, signers, runtime: Runtime, job: Job, document
                 raise
             raise SignerFailed(planned[exc.request_index][0], exc) from exc
     for signer, _ in planned:
-        _audit(runtime, signer, request_id=_new_request(), requester=job.sender, confirmed_by=None, before=document, after=signed)
+        _audit(runtime, signer, request_id=_new_request(), requester=job.sender, confirmed_by=None, before=document, after=signed,
+               filename=job.filename)
     _deliver(inbox, client, job.message_id, job.sender, signed, job.filename)
     _note(inbox, job.sender, "signed_by", job.filename, signed=", ".join(signer.config.name for signer, _ in planned))
 

@@ -1,9 +1,10 @@
 """Record of every signature: who asked, who approved, which hashes.
 
 The record identifies people only by the numbers and certificate aliases
-already present in the configuration. Document names, signer names and
-document content are never written. Entries are only ever added, and they
-are erased when they grow older than the retention period.
+already present in the configuration. It holds the name of each file that was
+signed, so that people recognize their documents in their own log, and never
+the content of a document. Entries are only ever added, and they are erased
+when they grow older than the retention period.
 """
 
 import json
@@ -23,7 +24,7 @@ def period_hours(written: str) -> int | None:
     return int(match[1]) * (24 if match[2] == "d" else 1) if match else None
 
 ALLOWED = frozenset({"event", "request_id", "certificate_id", "certificate_sha256", "requester", "confirmed_by",
-                     "approval", "document_sha256", "signed_sha256"})
+                     "approval", "document_sha256", "signed_sha256", "filename"})
 
 
 class AuditLog:
