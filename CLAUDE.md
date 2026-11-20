@@ -83,5 +83,8 @@ docker build -t sealwharf:local .
   in the code, and an answer word may not mean different answers in two
   languages. The one exception is the `bot status` command, written the same
   way by everyone and kept in `adapters/inbox.py`; only its answer is translated.
+- Nothing about a finished document is kept: its copy, file name and
+  fingerprint are erased when it is done, and its queue entry within an hour.
+  New stored state needs an erasing path, and `purge` must remove it.
 - A token PIN is tried once. After a refusal the guard file in the data folder
   blocks every further login until `token-retry` is run; never loop on a PIN.

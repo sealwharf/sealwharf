@@ -360,6 +360,15 @@ def _finish(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: 
     _discard(inbox, runtime, request_id)
 
 
+def forget_finished(inbox: Inbox, runtime: Runtime) -> None:
+    """Keep nothing about a document once it is done: its entry in the queue and any copy left on disk."""
+    inbox.forget_finished()
+    folder = runtime.pending_file("x").parent
+    for path in folder.iterdir() if folder.is_dir() else ():
+        if inbox.get_request(path.stem) is None:
+            path.unlink(missing_ok=True)
+
+
 def expire_requests(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: Runtime, *, now: float | None = None) -> None:
     """Close confirmations that were not answered in time."""
     moment = time.time() if now is None else now
@@ -729,6 +738,7 @@ def process_one(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], conte
     tell_outcomes(inbox, client, runtime)
     ask_questions(inbox, client, signers, runtime)
     tell_outcomes(inbox, client, runtime)
+    forget_finished(inbox, runtime)
     return job is not None
 
 

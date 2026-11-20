@@ -458,6 +458,18 @@ To get exactly the same result as on your computer, do one of these:
 - **Limits.** Each number may send 20 documents per hour, and a question stays open for 5 minutes. Both can be changed under `limits` in the configuration. For someone who sends documents in bulk, add `limit: 200` (documents per hour) to that person in `contacts`.
 - **Large batches take a moment.** Documents are signed one after the other, and the bot leaves a second between its messages so that WhatsApp does not take them for spam.
 - **Signed documents can be signed again.** Send a PDF that already has signatures to add another signer; the earlier signatures stay valid.
+- **What the bot keeps.** As little as it can. A document is held only while it is being signed or waits for an answer; after that its copy and its file name are erased at once, and the bare entry in the queue is gone within an hour. What stays in the `data` volume is the record of signatures, a copy of each version of your configuration with every secret removed, and the token driver.
+- **Erasing everything.** To leave nothing behind, stop the bot and run the `purge` command. It erases the queue, the documents still awaiting approval, the record of signatures and the configuration copies:
+
+  ```bash
+  docker compose stop sealwharf
+  ```
+
+  ```bash
+  docker compose run --rm sealwharf purge
+  ```
+
+  Start the bot again with `docker compose --profile token up -d`. The command refuses to run while the bot is working, and it keeps the token driver and the guard of a token that refused its PIN.
 - **Stopping.** `docker compose --profile token down` stops everything. Your configuration and records are kept.
 
 ## Advanced settings

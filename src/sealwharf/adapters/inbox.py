@@ -23,6 +23,8 @@ ANSWERS = {"yes": "1", "no": "0", "all": "all"}
 STATUS_COMMANDS = frozenset({"bot status", "botstatus"})
 # A document in one of these states waits for somebody's answer.
 AWAITING = "('awaiting_choice', 'awaiting_confirmation')"
+# A document in one of these states needs nothing more from the bot.
+FINISHED = "('done', 'sent', 'verified', 'refused', 'needs_review', 'failed', 'rate_limited', 'duplicate', 'uncertain')"
 
 
 def _question_kind(status: str) -> str:
@@ -149,7 +151,10 @@ class Inbox:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
 
     def connect(self):
-        return sqlite3.connect(self.path, timeout=10)
+        connection = sqlite3.connect(self.path, timeout=10)
+        # What is erased is overwritten in the file, not merely marked as free.
+        connection.execute("PRAGMA secure_delete = ON")
+        return connection
 
     def add(self, jobs: list) -> None:
         rows = [Job(*job) for job in jobs]
@@ -217,6 +222,19 @@ class Inbox:
                 (sender, digest, message_id)).fetchone() is not None
             db.execute("UPDATE jobs SET digest=? WHERE message_id=?", (None if repeated else digest, message_id))
         return repeated
+
+    def forget_finished(self, keep_seconds: float = 3600) -> None:
+        """Erase what is known about documents that need nothing more.
+
+        The file name, the caption and the fingerprint go at once. The bare
+        entry stays for an hour, only to count the hourly limit and to ignore
+        a message that the gateway delivers twice.
+        """
+        with self.connect() as db:
+            db.execute(f"UPDATE jobs SET media_id='', filename=NULL, body=NULL, digest=NULL WHERE state IN {FINISHED} "
+                       "AND (media_id<>'' OR filename IS NOT NULL OR body IS NOT NULL OR digest IS NOT NULL)")
+            db.execute(f"DELETE FROM jobs WHERE state IN {FINISHED} AND created_at < datetime('now', ?)",
+                       (f"-{int(keep_seconds)} seconds",))
 
     def recover_interrupted(self, lock: WorkerLock) -> tuple[int, int]:
         """Recover jobs only while holding the exclusive lock for this inbox.
