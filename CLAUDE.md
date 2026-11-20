@@ -27,14 +27,16 @@ command a reader needs.
   signing, validation and signature verification.
 - `src/sealwharf/application/`: `signers.py` opens the certificates;
   `worker.py` is the request flow (roles, owner approval, sequential
-  signatures, commands, audit).
+  signatures, commands, audit). `history.py` answers `bot log` with what
+  each person may read from the record of signatures.
 - `src/sealwharf/adapters/`: the WhatsApp gateways (`gateway.py` is what the bot
   needs from any of them, `gateways.py` lists the adapters, `whapi.py` and
   `waha.py` are one adapter each), inbox queue, audit record, worker lock and
   the local AI model.
 - `src/sealwharf/session.py`, `check.py`, `token_tools.py`, `healthcheck.py`,
-  `__main__.py`: container entry points (`run`, `check`, `token-driver`,
-  `token-check`, `token-retry`, `healthcheck`).
+  `purge.py`, `logs.py`, `__main__.py`: container entry points (`run`,
+  `check`, `token-driver`, `token-check`, `token-retry`, `healthcheck`,
+  `purge`, `log`).
 - `src/sealwharf/signer_config.py`: the single YAML configuration, secrets included.
 - `src/sealwharf/locales/*.toml`: one catalog per language (`en` is the
   reference, plus `pt-br` and `es`) with every chat message, the wake replies

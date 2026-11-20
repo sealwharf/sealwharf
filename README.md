@@ -11,6 +11,8 @@ Send a PDF or Word document and get it back digitally signed. Sealwharf runs on 
 - It finds the right place to sign by looking for the signer's name next to a signature line.
 - It can sign with certificate files (`.p12`, `.pfx`) and with USB tokens.
 - When someone asks to sign with another person's certificate, that person approves first, with a single reply.
+- It handles many documents at once and answers in English, Portuguese or Spanish.
+- It keeps as little as it can: a record of who signed what, which each person can read for their own part, and nothing of the documents.
 
 ## What you need
 
