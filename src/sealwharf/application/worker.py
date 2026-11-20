@@ -382,8 +382,9 @@ def forget_finished(inbox: Inbox, runtime: Runtime) -> None:
 
 
 def expire_requests(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], runtime: Runtime, *, now: float | None = None) -> None:
-    """Close confirmations that were not answered in time."""
+    """Close confirmations that were not answered in time, telling whoever was asked that the time has ended."""
     moment = time.time() if now is None else now
+    told: set[tuple[str, str | None]] = set()
     for request_id in inbox.expired_offers(moment):
         record = inbox.get_request(request_id)
         _discard(inbox, runtime, request_id)
@@ -392,6 +393,11 @@ def expire_requests(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
             _note(inbox, record.requester, "choice_expired", record.filename)
     for entry in inbox.expired_signatures(moment):
         inbox.set_signature_status(entry.request_id, entry.signer_id, "expired")
+        record = inbox.get_request(entry.request_id)
+        # The owner hears it too, once for each document: a late answer must not seem to be still awaited.
+        if record is not None and (entry.request_id, entry.owner) not in told:
+            told.add((entry.request_id, entry.owner))
+            _note(inbox, entry.owner, "approval_expired", record.filename)
         operational_logger().info("confirmation expired request=%s certificate=%s", entry.request_id, entry.signer_id)
         try:
             _finish(inbox, client, signers, runtime, entry.request_id)

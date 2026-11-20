@@ -368,8 +368,21 @@ def test_request_ignored_by_the_owner_expires_without_signing(world):
     assert world.state(message) == "awaiting_confirmation"
     later(world, 6)
     assert world.state(message) == "needs_review" and "was not signed" in world.chat.to(PREPARER)[-1]
+    # The owner is told that the time has ended, and an answer sent after that is not taken.
+    assert world.chat.to(OWNER_A)[-1] == ("The time to approve this request has ended, so nothing was signed with your certificate. "
+                                          "An answer sent now no longer counts.")
+    told = len(world.chat.to(OWNER_A))
     world.send(OWNER_A, text="1")
-    assert not world.chat.files and world.audit.entries() == []
+    assert not world.chat.files and world.audit.entries() == [] and len(world.chat.to(OWNER_A)) == told
+
+
+def test_an_owner_who_lets_several_documents_expire_is_told_once(world):
+    burst(world, PREPARER, [(f"{name}.pdf", make_pdf("Alice Example", name)) for name in ("one", "two")])
+    world.send(PREPARER, text="1")
+    asked = len(world.chat.to(OWNER_A))
+    later(world, 6)
+    assert world.chat.to(OWNER_A)[asked:] == [
+        "Here is what happened with your documents:\n- NOT signed, the time to approve has ended: one.pdf, two.pdf"]
     assert not list((world.tmp_path / "data" / "pending").glob("*.pdf"))
 
 

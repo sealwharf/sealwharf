@@ -196,7 +196,7 @@ Each person has only one open question at a time, so a plain `1` or `0` never an
   > Your document is in line for the approval of John Doe, with 2 request(s) ahead of it. I will ask as soon as it is its turn; you do not need to send it again.
 
 - **The time to answer** (5 minutes) starts only when the question is actually asked, never while it waits in line.
-- **No question is dropped in silence.** If nobody answers in time, nothing is signed and whoever sent the document is told so.
+- **No question is dropped in silence.** If nobody answers in time, nothing is signed, whoever sent the document is told so, and whoever was asked is told that the time has ended and that an answer no longer counts.
 - **The line has a limit.** Up to 20 documents may wait for the same owner. Past that, the bot says the owner has too many requests waiting and asks you to send the document again later.
 
 To see how many documents are waiting right now, send `bot status`.
