@@ -768,6 +768,16 @@ def test_bot_log_shows_each_person_only_the_signatures_they_took_part_in(world):
     assert world.chat.to(OWNER_A)[-1].startswith("Signatures in the last 2 day(s): 2.")
 
 
+def test_bot_help_lists_the_commands_in_the_language_of_whoever_asks(world):
+    message = world.send(OWNER_A, text="Bot Help")
+    assert world.state(message) == "done" and len(world.chat.to(OWNER_A)) == 1
+    assert world.chat.to(OWNER_A)[0].startswith("This is what you can send me:\n- A PDF or Word document")
+    portuguese = Runtime(world.runtime.data_dir, languages={OWNER_B: "pt-br"})
+    world.inbox.add([Job("help-pt", "", None, OWNER_B, "text", parse_command("bothelp"))])
+    assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
+    assert world.chat.to(OWNER_B)[0].startswith("Isto é o que você pode me enviar:") and "- acorda bot:" in world.chat.to(OWNER_B)[0]
+
+
 def test_the_log_command_takes_a_period_and_nothing_else():
     assert parse_command("bot log") == "log 168" and parse_command("BOT LOG 3d") == "log 72" and parse_command("botlog 12h") == "log 12"
     for near in ("bot logs", "log", "bot log 7", "bot log 0d", "bot log week", "bot log 7d please", "bot log 99999d", "show bot log"):

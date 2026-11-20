@@ -568,6 +568,8 @@ def _handle_command(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
         client.send_text(job.sender, wake_reply(runtime.language(job.sender)))
     elif action == "status":
         client.send_text(job.sender, status_report(inbox, signers, runtime.language(job.sender)))
+    elif action == "help":
+        runtime.say(client, job.sender, "help")
     elif action == "log":
         client.send_text(job.sender, log_report(runtime.audit, signers, job.sender, runtime.language(job.sender), runtime.called,
                                                 min(int(answer), runtime.log_days * 24), zone=runtime.zone))

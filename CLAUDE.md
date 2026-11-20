@@ -81,8 +81,9 @@ docker build -t sealwharf:local .
   catalog that is incomplete stops the program at start. A phrase people write
   (wake phrase, answer word, verify caption) goes in the catalogs too, never
   in the code, and an answer word may not mean different answers in two
-  languages. The one exception is the `bot status` command, written the same
-  way by everyone and kept in `adapters/inbox.py`; only its answer is translated.
+  languages. The exception is the commands (`bot status`, `bot log`,
+  `bot help`), written the same way by everyone and kept in
+  `adapters/inbox.py`; only their answers are translated.
 - Nothing about a finished document is kept: its copy, file name and
   fingerprint are erased when it is done, and its queue entry within an hour.
   New stored state needs an erasing path, and `purge` must remove it.

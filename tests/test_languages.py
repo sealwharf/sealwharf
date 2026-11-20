@@ -98,11 +98,21 @@ def test_each_language_has_its_own_wake_phrase_and_all_of_them_work_for_everyone
         assert parse_command(near) is None, near
 
 
-def test_the_status_command_is_written_in_english_by_everyone():
+def test_the_commands_are_written_in_english_by_everyone():
     for command in ("bot status", "Bot Status", " BOTSTATUS "):
         assert parse_command(command) == "status", command
-    for near in ("status", "bot status?", "status bot", "bot  status", "bot estado", "status do bot", "the bot status"):
+    for command in ("bot help", "Bot Help", " BOTHELP "):
+        assert parse_command(command) == "help", command
+    for near in ("status", "bot status?", "status bot", "bot  status", "bot estado", "status do bot", "the bot status",
+                 "help", "bot help me", "bot ajuda", "help bot", "bot help?"):
         assert parse_command(near) is None, near
+
+
+def test_the_help_names_every_command_and_the_phrases_of_its_own_language():
+    for code, wake, verify in (("en", "wake up bot", "verify"), ("pt-br", "acorda bot", "verificar"), ("es", "despierta bot", "comprobar")):
+        listed = text(code, "help")
+        assert all(command in listed for command in (wake, verify, "bot status", "bot log 12h", "bot help")), code
+        assert parse_command(wake) == "ping" and asks_verification(verify)
 
 
 def test_answers_and_the_verify_caption_are_understood_in_every_language():

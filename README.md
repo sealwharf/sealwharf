@@ -116,12 +116,13 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 | `wake up bot` | Answers with a short, playful line, to show it is working. |
 | `bot status` | Lists the installed certificates with their expiry dates, and how many documents wait for an answer. |
 | `bot log` | Lists the signatures you took part in during the last 7 days. `bot log 12h` or `bot log 30d` choose another period. |
+| `bot help` | Lists everything on this table, in your language. |
 
 Anything else you write is ignored, so the number can still be used for ordinary conversations.
 
-### The two commands
+### The commands
 
-Both commands work only for the numbers in `contacts`, and only when the message is exactly the command. Capital letters do not matter, and the words may be written together (`wakeupbot`, `botstatus`). A message that merely resembles a command, such as `wake up bot!` or `status`, gets no answer.
+The commands work only for the numbers in `contacts`, and only when the message is exactly the command. Capital letters do not matter, and the words may be written together (`wakeupbot`, `botstatus`). A message that merely resembles a command, such as `wake up bot!` or `status`, gets no answer.
 
 **`wake up bot`** is the quick test that the bot is alive. It answers with a line picked at random, in whatever mood it happens to be: sleepy, eager, grumpy, dramatic or sarcastic. For example:
 
@@ -451,7 +452,7 @@ To get exactly the same result as on your computer, do one of these:
 
 ## Good to know
 
-- **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact messages `wake up bot` (or its Portuguese or Spanish form) and `bot status` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
+- **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact messages `wake up bot` (or its Portuguese or Spanish form) and the commands `bot status`, `bot log` and `bot help` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
 - **Privacy.** Documents and certificates are processed on your computer. The gateway and Cloudflare only carry the messages. Certificates and passwords are never accepted through the chat: a `.p12` file sent to the bot is refused without being opened.
 - **Record of signatures.** Every signature is recorded with the time, who asked, who approved and the fingerprint of the document. The section "Logs" below tells who may read it and for how long it is kept.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.

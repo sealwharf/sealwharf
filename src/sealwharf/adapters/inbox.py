@@ -20,8 +20,9 @@ from .locking import WorkerLock, worker_lock_path
 ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
 SECRET_FILE = re.compile(r"\.(p12|pfx|pem|key|jks|keystore)$", re.IGNORECASE)
 ANSWERS = {"yes": "1", "no": "0", "all": "all"}
-# A command, not a phrase of a language: it is written the same way by everyone, and answered in the reader's language.
-STATUS_COMMANDS = frozenset({"bot status", "botstatus"})
+# Commands, not phrases of a language: written the same way by everyone, and answered in the reader's language.
+# `bot log` is a command too; it takes a period, so it is read apart.
+COMMANDS = {"bot status": "status", "botstatus": "status", "bot help": "help", "bothelp": "help"}
 # A document in one of these states waits for somebody's answer.
 AWAITING = "('awaiting_choice', 'awaiting_confirmation')"
 # A document in one of these states needs nothing more from the bot.
@@ -76,8 +77,8 @@ def parse_command(text: object) -> str | None:
     # number is also a personal one, so nothing that merely resembles the phrase may get a reply.
     if phrase_kind(text, ("wake",)) is not None:
         return "ping"
-    if normalized(text) in STATUS_COMMANDS:
-        return "status"
+    if normalized(text) in COMMANDS:
+        return COMMANDS[normalized(text)]
     log = re.fullmatch(r"bot ?log(?: (\S+))?", normalized(text))
     if log is not None:
         hours = period_hours(log[1] or DEFAULT_PERIOD)
