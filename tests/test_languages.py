@@ -36,7 +36,7 @@ def test_each_language_is_complete(code):
     for key in catalog.messages:
         filled = text(code, key, **dict.fromkeys(
             ("fonts", "signed", "names", "minutes", "options", "all", "name", "owner", "file", "count", "files", "owners", "ahead",
-             "requester", "waiting", "missing", "certificate", "date", "days", "moment", "position", "kind", "problem", "period", "when", "approval", "fingerprint", "shown"), "x"))
+             "requester", "waiting", "missing", "certificate", "date", "days", "moment", "position", "kind", "problem", "period", "when", "approval", "fingerprint", "shown", "zone"), "x"))
         assert filled.strip() and "{" not in filled, key
 
 
@@ -129,4 +129,20 @@ def test_the_configuration_accepts_every_language_and_refuses_unknown_ones(tmp_p
     for language, lang, message in (("fr", "es", "language must be one of"), ("en", "klingon", "lang of contact juan")):
         config.write_text(body.format(language=language, lang=lang), encoding="utf-8")
         with pytest.raises(ValueError, match=message):
+            load_config(config)
+
+
+def test_the_time_zone_is_optional_and_must_exist(tmp_path):
+    from sealwharf.signer_config import load_config
+    (tmp_path / "certificate.p12").write_bytes(b"synthetic")
+    config = tmp_path / "sealwharf.yaml"
+    body = ('contacts:\n  jane:\n    number: "5511999999999"\ncertificates:\n  - id: one\n    name: Jane Example\n'
+            '    file: certificate.p12\n    password: "synthetic"\n    owner: jane\n')
+    config.write_text(body, encoding="utf-8")
+    assert load_config(config).timezone is None
+    config.write_text(body + "timezone: America/Sao_Paulo\n", encoding="utf-8")
+    assert load_config(config).timezone == "America/Sao_Paulo"
+    for unknown in ("Mars/Olympus", "3", "''"):
+        config.write_text(body + f"timezone: {unknown}\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="timezone must be the name of a time zone"):
             load_config(config)

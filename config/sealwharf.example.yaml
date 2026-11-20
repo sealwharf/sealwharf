@@ -12,6 +12,7 @@ gateway_token: "paste-the-api-token-of-the-channel"
 # gateway_session: default      # only when the WAHA session has another name
 tunnel_token: "paste-the-cloudflare-tunnel-token"
 language: en                        # en, pt-br or es; used for contacts that set no lang of their own
+# timezone: America/Sao_Paulo       # for the times shown in the chat; without it, the time zone of the server
 
 # Everyone who may talk to the bot, registered once and referred to by id below.
 contacts:

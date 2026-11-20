@@ -107,7 +107,7 @@ def main() -> None:
     secret = webhook_secret(create=True)
     backup_configuration(config_path(), data)
     runtime = Runtime(data, config.requests_per_hour, config.confirmation_minutes, config.languages, config.names,
-                      config.request_limits, log_days=config.log_days)
+                      config.request_limits, log_days=config.log_days, timezone=config.timezone)
     server = tunnel = None
     model = LocalModelSession()
     db_path = data / "inbox.db"

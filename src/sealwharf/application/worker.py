@@ -18,6 +18,7 @@ from difflib import SequenceMatcher
 from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from pypdf import PdfReader
 
@@ -67,6 +68,8 @@ class Runtime:
     queue_limit: int = 20
     # How long the record of signatures is kept.
     log_days: int = 90
+    # The time zone of the times people read; None for the time zone of the server.
+    timezone: str | None = None
 
     @property
     def audit(self) -> AuditLog:
@@ -74,6 +77,10 @@ class Runtime:
 
     def pending_file(self, request_id: str) -> Path:
         return self.data_dir / "pending" / f"{request_id}.pdf"
+
+    @property
+    def zone(self) -> ZoneInfo | None:
+        return ZoneInfo(self.timezone) if self.timezone else None
 
     def language(self, number: str) -> str:
         return self.languages.get(number, DEFAULT_LANGUAGE)
@@ -563,7 +570,7 @@ def _handle_command(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
         client.send_text(job.sender, status_report(inbox, signers, runtime.language(job.sender)))
     elif action == "log":
         client.send_text(job.sender, log_report(runtime.audit, signers, job.sender, runtime.language(job.sender), runtime.called,
-                                                min(int(answer), runtime.log_days * 24)))
+                                                min(int(answer), runtime.log_days * 24), zone=runtime.zone))
     elif action == "answer":
         question = inbox.open_question(job.sender, time.time())
         # With no open question, a stray "1" or "yes" belongs to an ordinary conversation: stay silent.

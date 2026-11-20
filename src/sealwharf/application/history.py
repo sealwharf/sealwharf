@@ -5,7 +5,7 @@ when they asked for that signature, approved it, or own the certificate that
 made it.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 
 from ..adapters.audit import AuditLog
 from ..messages import text
@@ -21,11 +21,18 @@ def visible_entries(entries: list[dict], signers: tuple[UnlockedSigner, ...], nu
             if number in (entry.get("requester"), entry.get("confirmed_by")) or entry.get("certificate_id") in owned]
 
 
+def _zone_name(moment: datetime) -> str:
+    """Name a time zone by its distance from UTC, which reads the same in every language."""
+    minutes = int(moment.utcoffset().total_seconds() // 60)
+    return "UTC" if not minutes else f"UTC{'+' if minutes > 0 else '-'}{abs(minutes) // 60:02d}:{abs(minutes) % 60:02d}"
+
+
 def log_report(audit: AuditLog, signers: tuple[UnlockedSigner, ...], number: str, language: str, called, hours: int,
-               *, now: datetime | None = None) -> str:
+               *, zone: tzinfo | None = None, now: datetime | None = None) -> str:
     """Write the signatures of the last hours that this number may see, oldest first.
 
     `called` turns a number into the way that person is referred to in a message.
+    Times are written in `zone`, or in the time zone of the server when there is none.
     """
     moment = now or datetime.now(UTC)
     entries = visible_entries(audit.entries(moment - timedelta(hours=hours)), signers, number)
@@ -33,12 +40,12 @@ def log_report(audit: AuditLog, signers: tuple[UnlockedSigner, ...], number: str
     if not entries:
         return text(language, "log_none", period=period)
     names = {signer.config.id: signer.config.name for signer in signers}
-    lines = [text(language, "log_header", period=period, count=len(entries))]
+    lines = [text(language, "log_header", period=period, count=len(entries), zone=_zone_name(moment.astimezone(zone)))]
     for entry in entries[-MAX_LINES:]:
         approval = entry.get("approval")
         how = (text(language, "log_confirmed", owner=called(entry["confirmed_by"])) if approval == "confirmed"
                else text(language, {"owner": "log_own", "autotrust": "log_autotrust"}.get(approval, "log_trusted")))
-        lines.append(text(language, "log_line", when=datetime.fromisoformat(entry["time"]).astimezone(UTC).strftime("%Y-%m-%d %H:%M"),
+        lines.append(text(language, "log_line", when=datetime.fromisoformat(entry["time"]).astimezone(zone).strftime("%Y-%m-%d %H:%M"),
                           name=names.get(entry.get("certificate_id"), entry.get("certificate_id")),
                           requester=called(entry["requester"]), approval=how, fingerprint=(entry.get("signed_sha256") or "")[:8]))
     if len(entries) > MAX_LINES:
