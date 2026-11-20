@@ -42,7 +42,7 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("SEALWHARF_CONFIG", str(config))
     monkeypatch.setenv("SEALWHARF_DATA", str(tmp_path / "data"))
 
-    def write(*, password="correct horse", name="John Doe", head='public_url: https://bot.example.com\nwhapi_token: "whapi-secret"\n'
+    def write(*, password="correct horse", name="John Doe", head='public_url: https://bot.example.com\ngateway_token: "gateway-secret"\n'
                                                                   'tunnel_token: "tunnel-secret"\n'):
         config.write_text(head + 'contacts:\n  john:\n    name: John Doe\n    number: "5511900000001"\n'
                           f'certificates:\n  - id: john\n    name: {name}\n    file: certificates/john.p12\n'
@@ -59,10 +59,10 @@ def run_check(channel=lambda token, url: None):
 def test_check_confirms_a_working_configuration_without_printing_secrets(project):
     seen = []
     ready, report = run_check(lambda token, url: seen.append((token, url)))
-    assert ready and seen == [("whapi-secret", "https://gate.whapi.cloud")]
-    assert "certificate john: opens and matches its name" in report and "Whapi channel is connected" in report
+    assert ready and seen == [("gateway-secret", "https://gate.whapi.cloud")]
+    assert "certificate john: opens and matches its name" in report and "WhatsApp gateway is connected" in report
     assert report.endswith("Ready to start.")
-    for secret in ("correct horse", "whapi-secret", "tunnel-secret"):
+    for secret in ("correct horse", "gateway-secret", "tunnel-secret"):
         assert secret not in report
 
 
@@ -73,7 +73,7 @@ def test_check_lists_every_problem_at_once(project):
         raise AssertionError("No token, so the channel must not be contacted")
     ready, report = run_check(disconnected)
     assert not ready
-    for expected in ("public_url is missing", "whapi_token is missing", "tunnel_token is missing", "Could not open certificate john"):
+    for expected in ("public_url is missing", "gateway_token is missing", "tunnel_token is missing", "Could not open certificate john"):
         assert expected in report
     assert report.endswith("4 problem(s) to fix in config/sealwharf.yaml.") and "wrong" not in report.replace("wrong PIN", "")
 
@@ -82,9 +82,9 @@ def test_check_reports_name_mismatch_channel_failure_and_unreadable_file(project
     project(name="Jane Doe")
 
     def refused(token, url):
-        raise ValueError("The Whapi channel is not connected. Connect it in the Whapi dashboard.")
+        raise ValueError("The gateway is not connected to WhatsApp. Link the WhatsApp account in the gateway.")
     ready, report = run_check(refused)
-    assert not ready and "does not match certificate john" in report and "channel is not connected" in report
+    assert not ready and "does not match certificate john" in report and "gateway is not connected" in report
     project(password='broken" quote')
     ready, report = run_check()
     assert not ready and report.startswith("PROBLEM  configuration:")
@@ -143,7 +143,7 @@ def test_configuration_backup_keeps_one_copy_per_version_and_no_secrets(project,
     saved = first.read_text(encoding="utf-8")
     assert backup_configuration(source, tmp_path / "data") == first
     assert "id: john" in saved and "5511900000001" in saved and "owner: john" in saved and saved.count("REDACTED") == 3
-    for secret in ("correct horse", "whapi-secret", "tunnel-secret"):
+    for secret in ("correct horse", "gateway-secret", "tunnel-secret"):
         assert secret not in saved
     # Changing only a secret is not a new version; changing a setting is.
     project(password="another")

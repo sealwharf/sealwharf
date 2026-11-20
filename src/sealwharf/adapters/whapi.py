@@ -1,4 +1,4 @@
-"""Whapi operations with one configured host and transfer limits."""
+"""WhatsApp gateway operations, in the API of Whapi, with one configured host and transfer limits."""
 
 import re
 import time
@@ -26,7 +26,7 @@ def signed_filename(original: str | None, suffix: str = " - signed") -> str:
 
 def check_channel(token: str, transport: httpx.BaseTransport | None = None, url: str = WHAPI_URL) -> None:
     """Raise ValueError unless the token is valid and its channel is connected to WhatsApp."""
-    failure = "The Whapi token was refused or Whapi could not be reached."
+    failure = "The gateway token was refused or the gateway could not be reached."
     try:
         with httpx.Client(base_url=url, headers={"Authorization": f"Bearer {token}"},
                           timeout=15, follow_redirects=False, transport=transport) as client:
@@ -38,7 +38,7 @@ def check_channel(token: str, transport: httpx.BaseTransport | None = None, url:
     if not isinstance(health, dict) or not isinstance(health.get("status"), dict):
         raise ValueError(failure)
     if health["status"].get("text") != "AUTH":
-        raise ValueError("The Whapi channel is not connected. Connect it in the Whapi dashboard.")
+        raise ValueError("The gateway is not connected to WhatsApp. Link the WhatsApp account in the gateway.")
 
 
 class Whapi:

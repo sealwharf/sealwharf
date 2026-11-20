@@ -20,7 +20,7 @@ def check(*, channel=check_channel, output=print) -> bool:
         output(f"PROBLEM  configuration: {exc}")
         return False
     problems = 0
-    for key in ("public_url", "whapi_token", "tunnel_token"):
+    for key in ("public_url", "gateway_token", "tunnel_token"):
         if getattr(config, key) is None:
             output(f"PROBLEM  {key} is missing")
             problems += 1
@@ -32,10 +32,10 @@ def check(*, channel=check_channel, output=print) -> bool:
         except ValueError as exc:
             output(f"PROBLEM  {exc}")
             problems += 1
-    if config.whapi_token is not None:
+    if config.gateway_token is not None:
         try:
-            channel(config.whapi_token, url=config.whapi_url)
-            output("ok       Whapi channel is connected")
+            channel(config.gateway_token, url=config.gateway_url)
+            output("ok       WhatsApp gateway is connected")
         except ValueError as exc:
             output(f"PROBLEM  {exc}")
             problems += 1

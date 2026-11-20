@@ -24,7 +24,7 @@ from .paths import config_path, data_dir, webhook_secret
 from .signer_config import load_config
 
 BACKUPS_KEPT = 20
-SECRET_SETTINGS = frozenset({"whapi_token", "tunnel_token", "password"})
+SECRET_SETTINGS = frozenset({"gateway_token", "whapi_token", "tunnel_token", "password"})
 
 
 def _redacted(value):
@@ -95,7 +95,7 @@ def main() -> None:
         sys.exit("SEALWHARF_ALLOW_SETTINGS_DEFAULTS must be true or false.")
     try:
         config = load_config(config_path())
-        for key in ("public_url", "whapi_token", "tunnel_token"):
+        for key in ("public_url", "gateway_token", "tunnel_token"):
             if getattr(config, key) is None:
                 raise ValueError(f"{key} is missing from the configuration.")
         signers = unlock_signers(config.signers, data_dir=data)
@@ -110,7 +110,7 @@ def main() -> None:
     model = LocalModelSession()
     # A short pause between messages keeps a large batch from looking like a flood to WhatsApp.
     db_path = data / "inbox.db"
-    client = Whapi(config.whapi_token, addresses=Inbox(db_path), pace=1.0, url=config.whapi_url)
+    client = Whapi(config.gateway_token, addresses=Inbox(db_path), pace=1.0, url=config.gateway_url)
     worker_lock = WorkerLock.for_database(db_path)
     stage = "acquiring the worker lock"
     try:

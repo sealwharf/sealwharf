@@ -926,13 +926,13 @@ def config_file(tmp_path):
 
 
 def test_configuration_defines_contacts_roles_tokens_and_languages(config_file):
-    config_file.write_text('public_url: https://bot.example.com\nwhapi_token: "whapi-secret"\ntunnel_token: "tunnel-secret"\n'
+    config_file.write_text('public_url: https://bot.example.com\ngateway_token: "gateway-secret"\ntunnel_token: "tunnel-secret"\n'
                            + CONTACTS + CERTIFICATE + '    preparers: [paulo]\n    trusted: [tina]\n'
                            'limits:\n  requests_per_hour: 7\n  confirmation_minutes: 3\n', encoding="utf-8")
     config = load_config(config_file)
     signer = config.signers[0]
     assert (config.requests_per_hour, config.confirmation_minutes) == (7, 3)
-    assert (config.public_url, config.whapi_token, config.tunnel_token) == ("https://bot.example.com", "whapi-secret", "tunnel-secret")
+    assert (config.public_url, config.gateway_token, config.tunnel_token) == ("https://bot.example.com", "gateway-secret", "tunnel-secret")
     assert config.senders == {"5511900000001", "5511900000010", "5511900000011"} and signer.owner == "5511900000001"
     assert config.names == {"5511900000001": "Ana Owner", "5511900000010": "Paulo Preparer"}
     # A contact without its own lang uses the language of the file, which is English unless set.
@@ -941,9 +941,12 @@ def test_configuration_defines_contacts_roles_tokens_and_languages(config_file):
     assert signer.needs_confirmation("5511900000010") and signer.password == "0123"
     # Secrets never show up when the configuration is printed.
     assert "secret" not in repr(config) and "0123" not in repr(config)
-    assert config.whapi_url == "https://gate.whapi.cloud"
-    config_file.write_text("whapi_url: http://host.docker.internal:8787\n" + CONTACTS + CERTIFICATE, encoding="utf-8")
-    assert load_config(config_file).whapi_url == "http://host.docker.internal:8787"
+    # The gateway is Whapi.Cloud unless another address is given; the earlier name of its token still works.
+    assert config.gateway_url == "https://gate.whapi.cloud"
+    config_file.write_text('gateway_url: http://host.docker.internal:8787\nwhapi_token: "old-name"\n' + CONTACTS + CERTIFICATE,
+                           encoding="utf-8")
+    config = load_config(config_file)
+    assert (config.gateway_url, config.gateway_token) == ("http://host.docker.internal:8787", "old-name")
     config_file.write_text("language: pt-br\n" + CONTACTS + CERTIFICATE, encoding="utf-8")
     assert load_config(config_file).languages == {"5511900000001": "en", "5511900000010": "pt-br", "5511900000011": "pt-br"}
 
@@ -969,9 +972,11 @@ def test_one_contact_can_be_used_by_several_certificates(config_file):
     CONTACTS.replace("lang: pt-br", "lang: fr") + CERTIFICATE,                      # unsupported language
     "language: fr\n" + CONTACTS + CERTIFICATE,
     CONTACTS + CERTIFICATE + "limits:\n  confirmation_minutes: 0\n",
+    "gateway_token: has space\n" + CONTACTS + CERTIFICATE,
     "whapi_token: has space\n" + CONTACTS + CERTIFICATE,
-    "whapi_url: http://bridge.example/path\n" + CONTACTS + CERTIFICATE,
-    "whapi_url: http://user:secret@bridge.example\n" + CONTACTS + CERTIFICATE,
+    'gateway_token: "one"\nwhapi_token: "two"\n' + CONTACTS + CERTIFICATE,         # the same setting under both names
+    "gateway_url: http://bridge.example/path\n" + CONTACTS + CERTIFICATE,
+    "gateway_url: http://user:secret@bridge.example\n" + CONTACTS + CERTIFICATE,
     "tunnel_token: 12345\n" + CONTACTS + CERTIFICATE,
     "public_url: http://bot.example.com\n" + CONTACTS + CERTIFICATE,
 ])

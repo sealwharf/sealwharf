@@ -35,9 +35,9 @@ Cloudflare shows a command to install a program. **Do not install anything.** Ju
 
 ### 3. Get the WhatsApp token
 
-In the Whapi dashboard, open your channel and copy its **API token**. The channel must be connected (QR code scanned).
+The bot reaches WhatsApp through a *gateway*. The usual one is Whapi.Cloud: in its dashboard, open your channel and copy its **API token**. The channel must be connected (QR code scanned).
 
-If you run a Whapi-compatible service of your own instead of Whapi.Cloud, use its token here and add its address to the configuration in step 4, in a line such as `whapi_url: http://host.docker.internal:8787`.
+Any other gateway that speaks the same API works too. Use its token here and add its address to the configuration in step 4, in a line such as `gateway_url: http://host.docker.internal:8787`.
 
 ### 4. Fill in the configuration
 
@@ -45,7 +45,7 @@ Create a folder named `certificates` inside `config/` and copy your certificate 
 
 ```yaml
 public_url: https://bot.example.com        # the address you will create in step 5
-whapi_token: "the token from step 3"
+gateway_token: "the token from step 3"
 tunnel_token: "the token from step 2"
 
 contacts:
@@ -342,7 +342,7 @@ docker compose run --rm sealwharf check
 
 | What you see | What to do |
 | --- | --- |
-| The bot does not answer `wake up bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the Whapi channel is connected. |
+| The bot does not answer `wake up bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the WhatsApp gateway is connected (on Whapi.Cloud, the channel in its dashboard). |
 | `docker compose ps` shows the bot restarting | Run `docker compose logs sealwharf` and the check above. The usual causes are a mistake in the configuration or the Cloudflare route from step 5 not created yet. |
 | "I could not find a clear place to sign" | The document needs the signer's full name, as in the certificate, next to one empty signature line. The name must appear only once as a signature label. |
 | "Could not open certificate" | The password is wrong, or the certificate file is not in `config/certificates/`. |

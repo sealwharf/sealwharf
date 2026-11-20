@@ -69,12 +69,12 @@ class AppConfig:
     # The fixed HTTPS address the tunnel publishes, and the tokens of the two services.
     # The loader accepts a file without them; the bot refuses to start without them.
     public_url: str | None = None
-    whapi_token: str | None = field(default=None, repr=False)
+    gateway_token: str | None = field(default=None, repr=False)
     tunnel_token: str | None = field(default=None, repr=False)
     # Contacts with an hourly limit of their own, for people who send documents in bulk.
     request_limits: dict[str, int] = field(default_factory=dict)
-    # Where the Whapi API is served: Whapi.Cloud, unless a compatible service of your own is set.
-    whapi_url: str = "https://gate.whapi.cloud"
+    # Where the WhatsApp gateway is served. Any service that speaks the Whapi API works; Whapi.Cloud is the default.
+    gateway_url: str = "https://gate.whapi.cloud"
 
     @property
     def senders(self) -> frozenset[str]:
@@ -93,15 +93,15 @@ def load_config(path: Path) -> AppConfig:
             config = yaml.safe_load(stream)
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError("Could not read the configuration file.") from exc
-    if not isinstance(config, dict) or set(config) - {"public_url", "whapi_token", "whapi_url", "tunnel_token", "language", "contacts",
+    if not isinstance(config, dict) or set(config) - {"public_url", "gateway_token", "gateway_url", "whapi_token", "tunnel_token", "language", "contacts",
                                                       "certificates", "limits"}:
-        raise ValueError("The configuration may contain only public_url, whapi_token, whapi_url, tunnel_token, language, contacts, "
+        raise ValueError("The configuration may contain only public_url, gateway_token, gateway_url, tunnel_token, language, contacts, "
                          "certificates and limits.")
     default_language = resolve_language(str(config.get("language", DEFAULT_LANGUAGE)))
     if default_language is None:
         raise ValueError("language must be one of: " + ", ".join(LANGUAGES) + ".")
     tokens = {}
-    for key in ("whapi_token", "tunnel_token"):
+    for key in ("gateway_token", "whapi_token", "tunnel_token"):
         value = config.get(key)
         if value is not None and (not isinstance(value, str) or not value or len(value) > 2000 or any(c.isspace() for c in value)):
             raise ValueError(f"{key} must be the token as text, in quotes and without spaces.")
@@ -109,9 +109,12 @@ def load_config(path: Path) -> AppConfig:
     public_url = config.get("public_url")
     if public_url is not None and (not isinstance(public_url, str) or not PUBLIC_URL.fullmatch(public_url)):
         raise ValueError("public_url must be the bot's HTTPS address, such as https://bot.example.com, with nothing after it.")
-    whapi_url = config.get("whapi_url", AppConfig.whapi_url)
-    if not isinstance(whapi_url, str) or not SERVICE_URL.fullmatch(whapi_url):
-        raise ValueError("whapi_url must be the address of a Whapi-compatible service, such as http://host.docker.internal:8787, "
+    if tokens["gateway_token"] is not None and tokens["whapi_token"] is not None:
+        raise ValueError("Use gateway_token alone; whapi_token is its earlier name.")
+    gateway_token = tokens["gateway_token"] or tokens["whapi_token"]
+    gateway_url = config.get("gateway_url", AppConfig.gateway_url)
+    if not isinstance(gateway_url, str) or not SERVICE_URL.fullmatch(gateway_url):
+        raise ValueError("gateway_url must be the address of the WhatsApp gateway, such as http://host.docker.internal:8787, "
                          "with nothing after it.")
     entries = config.get("certificates")
     if not isinstance(entries, list) or not 1 <= len(entries) <= 50 or any(not isinstance(entry, dict) for entry in entries):
@@ -134,8 +137,8 @@ def load_config(path: Path) -> AppConfig:
             or isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 60):
         raise ValueError("Limits must be whole numbers: 1-1000 requests per hour and 1-60 confirmation minutes.")
     request_limits = {contact.number: contact.limit for contact in contacts.values() if contact.limit is not None}
-    return AppConfig(signers, languages, contact_names, per_hour, minutes, public_url, tokens["whapi_token"], tokens["tunnel_token"],
-                     request_limits, whapi_url)
+    return AppConfig(signers, languages, contact_names, per_hour, minutes, public_url, gateway_token, tokens["tunnel_token"],
+                     request_limits, gateway_url)
 
 
 def _parse_contacts(value: object, default_language: str) -> dict[str, Contact]:
