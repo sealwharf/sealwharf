@@ -46,6 +46,7 @@ from ..documents.validation import validate_pdf
 from ..documents.verification import describe, verify_signatures
 from ..documents.visual_position import suggest_visual_positions
 from ..messages import DEFAULT_LANGUAGE, text, wake_reply
+from .history import log_report
 from .signers import UnlockedSigner, status_report, token_settings, words
 
 SETTLE_SECONDS = 5
@@ -64,6 +65,8 @@ class Runtime:
     settle_seconds: float = field(default_factory=lambda: SETTLE_SECONDS)
     # How many documents may wait for one owner's approval.
     queue_limit: int = 20
+    # How long the record of signatures is kept.
+    log_days: int = 90
 
     @property
     def audit(self) -> AuditLog:
@@ -558,6 +561,9 @@ def _handle_command(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
         client.send_text(job.sender, wake_reply(runtime.language(job.sender)))
     elif action == "status":
         client.send_text(job.sender, status_report(inbox, signers, runtime.language(job.sender)))
+    elif action == "log":
+        client.send_text(job.sender, log_report(runtime.audit, signers, job.sender, runtime.language(job.sender), runtime.called,
+                                                min(int(answer), runtime.log_days * 24)))
     elif action == "answer":
         question = inbox.open_question(job.sender, time.time())
         # With no open question, a stray "1" or "yes" belongs to an ordinary conversation: stay silent.

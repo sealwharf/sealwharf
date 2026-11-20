@@ -1,16 +1,26 @@
-"""Append-only record of every signature: who asked, who approved, which hashes.
+"""Record of every signature: who asked, who approved, which hashes.
 
 The record identifies people only by the numbers and certificate aliases
 already present in the configuration. Document names, signer names and
-document content are never written.
+document content are never written. Entries are only ever added, and they
+are erased when they grow older than the retention period.
 """
 
 import json
 import logging
 import os
+import re
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+DEFAULT_PERIOD = "7d"
+
+
+def period_hours(written: str) -> int | None:
+    """Read how far back to look, as in `12h` or `7d`; None when it is not such a period."""
+    match = re.fullmatch(r"([1-9]\d{0,3})([hd])", written.strip().casefold())
+    return int(match[1]) * (24 if match[2] == "d" else 1) if match else None
 
 ALLOWED = frozenset({"event", "request_id", "certificate_id", "certificate_sha256", "requester", "confirmed_by",
                      "approval", "document_sha256", "signed_sha256"})
@@ -30,10 +40,22 @@ class AuditLog:
             stream.flush()
             os.fsync(stream.fileno())
 
-    def entries(self) -> list[dict]:
+    def entries(self, since: datetime | None = None) -> list[dict]:
+        """Return the entries, oldest first; with `since`, only those made from that moment on."""
         if not self.path.is_file():
             return []
-        return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        entries = [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return entries if since is None else [entry for entry in entries if datetime.fromisoformat(entry["time"]) >= since]
+
+    def prune(self, keep_days: int, *, now: datetime | None = None) -> int:
+        """Erase the entries older than the retention period; return how many were erased."""
+        everything = self.entries()
+        kept = self.entries((now or datetime.now(UTC)) - timedelta(days=keep_days))
+        if len(kept) < len(everything):
+            temporary = self.path.with_suffix(".tmp")
+            temporary.write_text("".join(json.dumps(entry, sort_keys=True) + "\n" for entry in kept), encoding="utf-8", newline="\n")
+            os.replace(temporary, self.path)
+        return len(everything) - len(kept)
 
 
 def operational_logger() -> logging.Logger:

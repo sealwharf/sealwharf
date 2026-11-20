@@ -86,5 +86,8 @@ docker build -t sealwharf:local .
 - Nothing about a finished document is kept: its copy, file name and
   fingerprint are erased when it is done, and its queue entry within an hour.
   New stored state needs an erasing path, and `purge` must remove it.
+- Through the chat a person reads only the log entries they asked for,
+  approved, or that used a certificate they own (`application/history.py`).
+  The record of signatures is erased after `log_days`.
 - A token PIN is tried once. After a refusal the guard file in the data folder
   blocks every further login until `token-retry` is run; never loop on a PIN.

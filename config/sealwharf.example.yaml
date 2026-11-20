@@ -57,3 +57,4 @@ certificates:
 limits:
   requests_per_hour: 20             # documents accepted from each number
   confirmation_minutes: 5           # how long a question stays open for an answer
+  log_days: 90                      # how long the record of signatures is kept

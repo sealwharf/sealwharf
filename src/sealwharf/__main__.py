@@ -2,7 +2,7 @@
 
 import sys
 
-COMMANDS = ("run", "check", "healthcheck", "token-driver", "token-check", "token-retry", "purge")
+COMMANDS = ("run", "check", "healthcheck", "token-driver", "token-check", "token-retry", "purge", "log")
 
 
 def main() -> None:
@@ -22,6 +22,8 @@ def main() -> None:
         from .session import allow_token_retry as run
     elif command == "purge":
         from .purge import main as run
+    elif command == "log":
+        from .logs import main as run
     else:
         sys.exit("Usage: sealwharf [" + "|".join(COMMANDS) + "]")
     run()

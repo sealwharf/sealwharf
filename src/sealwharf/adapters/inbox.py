@@ -13,6 +13,7 @@ from typing import NamedTuple
 
 from ..authorization import canonical_number
 from ..messages import normalized, phrase_kind
+from .audit import DEFAULT_PERIOD, period_hours
 from .gateway import Incoming
 from .locking import WorkerLock, worker_lock_path
 
@@ -65,7 +66,7 @@ class SigningRequestRecord(NamedTuple):
 
 
 def parse_command(text: object) -> str | None:
-    """Reduce a chat message to the wake phrase, the status command or an answer, or None so it is discarded.
+    """Reduce a chat message to the wake phrase, a command or an answer, or None so it is discarded.
 
     The number may also be used for ordinary conversations, which are never kept.
     """
@@ -77,6 +78,10 @@ def parse_command(text: object) -> str | None:
         return "ping"
     if normalized(text) in STATUS_COMMANDS:
         return "status"
+    log = re.fullmatch(r"bot ?log(?: (\S+))?", normalized(text))
+    if log is not None:
+        hours = period_hours(log[1] or DEFAULT_PERIOD)
+        return f"log {hours}" if hours is not None else None
     words = re.sub(r"[^a-z0-9 ]", "", normalized(text)).split()
     if len(words) != 1:
         return None

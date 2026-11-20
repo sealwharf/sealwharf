@@ -107,7 +107,7 @@ def main() -> None:
     secret = webhook_secret(create=True)
     backup_configuration(config_path(), data)
     runtime = Runtime(data, config.requests_per_hour, config.confirmation_minutes, config.languages, config.names,
-                      config.request_limits)
+                      config.request_limits, log_days=config.log_days)
     server = tunnel = None
     model = LocalModelSession()
     db_path = data / "inbox.db"
@@ -147,6 +147,7 @@ def main() -> None:
             inbox.set_mark("heartbeat")
             if time.time() - last_warning >= 3600:
                 warn_expiring(inbox, client, signers, config.languages)
+                runtime.audit.prune(config.log_days)
                 last_warning = time.time()
             if not process_one(inbox, client, signers, model.review_contextual, model.suggest_general, runtime):
                 time.sleep(2)

@@ -115,6 +115,7 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 | A PDF with the caption `verify` (or `verificar`) | Checks the signatures of that PDF, without signing. |
 | `wake up bot` | Answers with a short, playful line, to show it is working. |
 | `bot status` | Lists the installed certificates with their expiry dates, and how many documents wait for an answer. |
+| `bot log` | Lists the signatures you took part in during the last 7 days. `bot log 12h` or `bot log 30d` choose another period. |
 
 Anything else you write is ignored, so the number can still be used for ordinary conversations.
 
@@ -452,7 +453,7 @@ To get exactly the same result as on your computer, do one of these:
 
 - **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact messages `wake up bot` (or its Portuguese or Spanish form) and `bot status` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
 - **Privacy.** Documents and certificates are processed on your computer. The gateway and Cloudflare only carry the messages. Certificates and passwords are never accepted through the chat: a `.p12` file sent to the bot is refused without being opened.
-- **Record of signatures.** Every signature is recorded with the time, who asked, who approved and the fingerprint of the document. Read the record with `docker compose exec sealwharf cat /data/audit.jsonl`.
+- **Record of signatures.** Every signature is recorded with the time, who asked, who approved and the fingerprint of the document. The section "Logs" below tells who may read it and for how long it is kept.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.
 - **Expiring certificates.** From 30 days before a certificate expires, its owner gets a daily reminder.
 - **Limits.** Each number may send 20 documents per hour, and a question stays open for 5 minutes. Both can be changed under `limits` in the configuration. For someone who sends documents in bulk, add `limit: 200` (documents per hour) to that person in `contacts`.
@@ -471,6 +472,39 @@ To get exactly the same result as on your computer, do one of these:
 
   Start the bot again with `docker compose --profile token up -d`. The command refuses to run while the bot is working, and it keeps the token driver and the guard of a token that refused its PIN.
 - **Stopping.** `docker compose --profile token down` stops everything. Your configuration and records are kept.
+
+## Logs
+
+The bot keeps two kinds of log, and each has its own rule.
+
+| Log | What it holds | Who reads it | How long it is kept |
+| --- | --- | --- | --- |
+| Record of signatures | For each signature: the time, the certificate, who asked, who approved and the fingerprint of the document. Never the name or the content of a document. | Each person, through the chat, reads only their own part. Whoever runs the bot reads all of it. | 90 days, then it is erased. Change it with `log_days` under `limits`. |
+| Operational log | What the bot is doing: started, signed, a question expired. No phone numbers, names or file names. | Whoever runs the bot, with `docker compose logs sealwharf`. | Until the container is created again. |
+
+**Reading your own log in the chat.** Send `bot log` to the bot. It answers with the signatures of the last 7 days that you asked for, that you approved, or that were made with a certificate you own. Nobody sees the signatures of other people.
+
+```text
+Signatures in the last 7 day(s): 2. Times in UTC.
+2026-11-19 14:02 · John Doe · asked by Jane Doe · approved by John Doe · file 3fa9c1d2
+2026-11-20 09:41 · John Doe · asked by John Doe · own certificate · file 77ab01ce
+```
+
+Add a period to look further back or closer: a number followed by `h` (hours) or `d` (days), such as `bot log 12h` or `bot log 30d`. The command is written the same way in every language, and at most the 30 latest signatures are shown. The last item of each line is the start of the SHA-256 fingerprint of the signed file, which tells one document from another without naming it.
+
+**Reading the whole record.** Whoever runs the bot can read every entry, with the same kind of period and two optional filters:
+
+```bash
+docker compose exec sealwharf python -m sealwharf log 30d
+```
+
+```bash
+docker compose exec sealwharf python -m sealwharf log 7d --certificate john
+```
+
+```bash
+docker compose exec sealwharf python -m sealwharf log 24h --number 5511999999999
+```
 
 ## Advanced settings
 

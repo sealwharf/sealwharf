@@ -22,6 +22,7 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sealwharf.adapters.audit import AuditLog
 from sealwharf.adapters.inbox import Inbox, Job, accepted_events, parse_command
 from sealwharf.adapters.whapi import Whapi, read_messages, signed_filename
+from sealwharf.application.history import log_report
 from sealwharf.application.signers import status_report, unlock_signers, warn_expiring
 from sealwharf.application.worker import Runtime, ask_questions, expire_requests, process_one, tell_outcomes
 from sealwharf.authorization import canonical_number, format_number
@@ -724,6 +725,52 @@ def test_bot_status_lists_the_certificates_with_their_expiry_dates(world):
     token = (replace(world.signers[0], config=replace(world.signers[0].config, token_module=Path("module.so"), token_label="t")),)
     assert "1. Alice Example (USB token): valid until" in status_report(world.inbox, token, "en", now=now)
     assert world.audit.entries() == []
+
+
+def test_bot_log_shows_each_person_only_the_signatures_they_took_part_in(world):
+    world.send(PREPARER, make_pdf("Alice Example", "one"))
+    world.send(OWNER_A, text="1")
+    world.send(TRUSTED, make_pdf("Alice Example", "two"))
+    world.send(OWNER_B, make_pdf("Bruno Example"))
+    files = [hashlib.sha256(data).hexdigest()[:8] for _, data, _ in world.chat.files]
+
+    def log(number, command="bot log"):
+        world.send(number, text=command)
+        return world.chat.to(number)[-1].splitlines()
+    # The owner sees what was done with the certificate, whoever asked.
+    owner = log(OWNER_A)
+    assert owner[0] == "Signatures in the last 7 day(s): 2. Times in UTC." and len(owner) == 3
+    assert owner[1].endswith(f" · Alice Example · asked by Paulo Preparer · approved by Ana · file {files[0]}")
+    assert owner[2].endswith(f" · Alice Example · asked by {format_number(TRUSTED)} · trusted contact · file {files[1]}")
+    # Whoever asked sees their own requests; nobody sees the signatures of other people.
+    assert log(PREPARER, "Bot Log 12h")[0] == "Signatures in the last 12 hour(s): 1. Times in UTC."
+    assert log(OWNER_B, "botlog 30d")[1].endswith(f" · Bruno Example · asked by {format_number(OWNER_B)} · own certificate · file {files[2]}")
+    assert log(OWNER_C) == ["No signatures of yours in the last 7 day(s)."]
+    assert all("Bruno Example" not in line for line in owner) and len(world.audit.entries()) == 3
+    # The time filter, and the language of whoever asks.
+    later = datetime.now(UTC) + timedelta(days=8)
+    assert log_report(world.audit, world.signers, OWNER_A, "pt-br", world.runtime.called, 168, now=later) == (
+        "Nenhuma assinatura sua no período de 7 dia(s).")
+    assert log_report(world.audit, world.signers, OWNER_A, "es", world.runtime.called, 24 * 30, now=later).startswith(
+        "Firmas en el período de 30 día(s): 2. Horas en UTC.")
+    # A period longer than the record is kept is shortened to it.
+    short = Runtime(world.runtime.data_dir, names=dict(PEOPLE), log_days=2)
+    world.inbox.add([Job("log-long", "", None, OWNER_A, "text", parse_command("bot log 400d"))])
+    assert process_one(world.inbox, world.chat, world.signers, runtime=short)
+    assert world.chat.to(OWNER_A)[-1].startswith("Signatures in the last 2 day(s): 2.")
+
+
+def test_the_log_command_takes_a_period_and_nothing_else():
+    assert parse_command("bot log") == "log 168" and parse_command("BOT LOG 3d") == "log 72" and parse_command("botlog 12h") == "log 12"
+    for near in ("bot logs", "log", "bot log 7", "bot log 0d", "bot log week", "bot log 7d please", "bot log 99999d", "show bot log"):
+        assert parse_command(near) is None, near
+
+
+def test_the_record_of_signatures_is_erased_after_the_retention_period(world):
+    world.send(OWNER_A, make_pdf("Alice Example"))
+    assert len(world.audit.entries()) == 1 and world.audit.prune(90) == 0
+    assert world.audit.prune(1, now=datetime.now(UTC) + timedelta(days=2)) == 1
+    assert world.audit.entries() == [] and world.audit.path.read_text(encoding="utf-8") == ""
 
 
 def test_ordinary_conversation_is_never_answered(world):
