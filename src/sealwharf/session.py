@@ -12,11 +12,11 @@ import httpx
 import yaml
 
 from .adapters.audit import operational_logger
+from .adapters.gateway import GatewayError
+from .adapters.gateways import open_gateway
 from .adapters.inbox import Inbox
 from .adapters.locking import WorkerLock
 from .adapters.model_runtime import LocalModelSession
-from .adapters.whapi import Whapi
-from .adapters.whapi_webhook import WebhookSettingsError, configure_verified
 from .application.signers import unlock_signers, warn_expiring
 from .application.worker import Runtime, process_one
 from .logging_config import suppress_document_library_logs
@@ -99,6 +99,8 @@ def main() -> None:
             if getattr(config, key) is None:
                 raise ValueError(f"{key} is missing from the configuration.")
         signers = unlock_signers(config.signers, data_dir=data)
+        # A short pause between messages keeps a large batch from looking like a flood to WhatsApp.
+        client = open_gateway(config, addresses=Inbox(data / "inbox.db"), pace=1.0)
     except ValueError as exc:
         # These messages carry fixed text, setting names and certificate aliases only.
         sys.exit(f"Could not start: {exc} Fix config/sealwharf.yaml; the check command lists every problem.")
@@ -108,9 +110,7 @@ def main() -> None:
                       config.request_limits)
     server = tunnel = None
     model = LocalModelSession()
-    # A short pause between messages keeps a large batch from looking like a flood to WhatsApp.
     db_path = data / "inbox.db"
-    client = Whapi(config.gateway_token, addresses=Inbox(db_path), pace=1.0, url=config.gateway_url)
     worker_lock = WorkerLock.for_database(db_path)
     stage = "acquiring the worker lock"
     try:
@@ -136,8 +136,8 @@ def main() -> None:
         stage = "connecting the tunnel"
         tunnel = _start(["cloudflared", "tunnel", "--no-autoupdate", "run"], TUNNEL_TOKEN=config.tunnel_token)
         wait_for_public_health(config.public_url)
-        stage = "configuring the channel webhook"
-        configure_verified(client.client, config.public_url, secret, allow_incomplete_snapshot=allow_defaults == "true")
+        stage = "configuring the gateway webhook"
+        client.connect_webhook(config.public_url, secret, allow_incomplete_snapshot=allow_defaults == "true")
         log.info("session started certificates=%d", len(signers))
         stage = "processing documents"
         last_warning = 0.0
@@ -155,7 +155,7 @@ def main() -> None:
     except Exception as exc:
         status = f" (HTTP {exc.response.status_code})" if isinstance(exc, httpx.HTTPStatusError) else ""
         log.info("session failed while %s%s", stage, status)
-        if isinstance(exc, WebhookSettingsError):
+        if isinstance(exc, GatewayError):
             log.info("%s", exc)
         raise SystemExit(1) from None
     finally:

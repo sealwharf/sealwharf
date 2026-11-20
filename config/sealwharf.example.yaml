@@ -3,8 +3,13 @@
 # After editing, check it with: docker compose run --rm sealwharf check
 
 public_url: https://bot.example.com # the public hostname of your Cloudflare tunnel
-gateway_token: "paste-the-token-of-the-whatsapp-gateway"  # for Whapi.Cloud, the API token of the channel
-# gateway_url: http://host.docker.internal:8787  # only for a gateway other than Whapi.Cloud
+# The WhatsApp gateway. With Whapi.Cloud, only the token is needed:
+gateway_token: "paste-the-api-token-of-the-channel"
+# With WAHA on this computer, use these lines instead (the token is the WAHA API key):
+# gateway_type: waha
+# gateway_url: http://host.docker.internal:3000
+# gateway_token: "paste-the-waha-api-key"
+# gateway_session: default      # only when the WAHA session has another name
 tunnel_token: "paste-the-cloudflare-tunnel-token"
 language: en                        # en, pt-br or es; used for contacts that set no lang of their own
 

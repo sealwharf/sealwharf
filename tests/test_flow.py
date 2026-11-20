@@ -21,7 +21,7 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from sealwharf.adapters.audit import AuditLog
 from sealwharf.adapters.inbox import Inbox, Job, accepted_events, parse_command
-from sealwharf.adapters.whapi import Whapi, signed_filename
+from sealwharf.adapters.whapi import Whapi, read_messages, signed_filename
 from sealwharf.application.signers import status_report, unlock_signers, warn_expiring
 from sealwharf.application.worker import Runtime, ask_questions, expire_requests, process_one, tell_outcomes
 from sealwharf.authorization import canonical_number, format_number
@@ -170,7 +170,7 @@ def test_unauthorized_number_is_ignored_at_the_webhook_and_by_the_worker(world):
     payload = {"event": {"type": "messages", "event": "post"},
                "messages": [{"id": "x1", "from_me": False, "type": "document", "chat_id": f"{STRANGER}@s.whatsapp.net",
                              "from": STRANGER, "document": {"id": "media-x", "file_name": "a.pdf"}}]}
-    assert accepted_events(payload, frozenset({OWNER_A})) == []
+    assert accepted_events(read_messages(payload), frozenset({OWNER_A})) == []
     message = world.send(STRANGER, make_pdf("Alice Example"))
     assert world.state(message) == "needs_review"
     assert not world.chat.texts and not world.chat.notes and not world.chat.files and not world.chat.downloads
@@ -737,10 +737,10 @@ def test_ordinary_conversation_is_never_answered(world):
                "messages": [{"id": f"t{index}", "from_me": False, "type": "text", "chat_id": chat, "text": {"body": body}}
                             for index, body in enumerate(["help", "ajuda", "verificar", "ping", "see you at 5", "BOTM4", "acordsa bot", "acorda o bot",
                                                        "acorda bot!", "bom dia, acorda bot", "status", "bot status please", "ACORDA BOT"])]}
-    assert [job.body for job in accepted_events(payload, frozenset({OWNER_A}))] == ["ping"]
+    assert [job.body for job in accepted_events(read_messages(payload), frozenset({OWNER_A}))] == ["ping"]
     payload["messages"] = [{"id": "d1", "from_me": False, "type": "document", "chat_id": chat,
                             "document": {"id": "media-d", "file_name": "a.pdf", "caption": " Verificar "}}]
-    assert accepted_events(payload, frozenset({OWNER_A}))[0].body == "verify"
+    assert accepted_events(read_messages(payload), frozenset({OWNER_A}))[0].body == "verify"
 
 
 def test_key_material_sent_in_chat_is_refused_without_download(world):
@@ -749,7 +749,7 @@ def test_key_material_sent_in_chat_is_refused_without_download(world):
                              "document": {"id": "media-k", "file_name": "alice.P12"}},
                             {"id": "k2", "from_me": False, "type": "text", "chat_id": f"{OWNER_A}@s.whatsapp.net",
                              "text": {"body": "my password is hunter2"}}]}
-    events = accepted_events(payload, frozenset({OWNER_A}))
+    events = accepted_events(read_messages(payload), frozenset({OWNER_A}))
     assert events == [Job("k1", "", None, OWNER_A, "refused", None)]
     world.inbox.add(events)
     assert process_one(world.inbox, world.chat, world.signers, runtime=world.runtime)
@@ -863,7 +863,7 @@ def test_brazilian_numbers_match_with_or_without_the_ninth_digit(world):
     payload = {"event": {"type": "messages", "event": "post"},
                "messages": [{"id": "n1", "from_me": False, "type": "text", "chat_id": f"{whatsapp}@s.whatsapp.net",
                              "from": whatsapp, "text": {"body": "Acorda Bot"}}]}
-    events = accepted_events(payload, frozenset({written}))
+    events = accepted_events(read_messages(payload), frozenset({written}))
     assert events == [Job("n1", "", None, written, "text", "ping", whatsapp)]
     world.inbox.add(events)
     # The job carries the configured number; replies go to the identifier WhatsApp used.
@@ -941,12 +941,16 @@ def test_configuration_defines_contacts_roles_tokens_and_languages(config_file):
     assert signer.needs_confirmation("5511900000010") and signer.password == "0123"
     # Secrets never show up when the configuration is printed.
     assert "secret" not in repr(config) and "0123" not in repr(config)
-    # The gateway is Whapi.Cloud unless another address is given; the earlier name of its token still works.
-    assert config.gateway_url == "https://gate.whapi.cloud"
+    # The gateway is Whapi.Cloud unless another one is named; the earlier name of its token still works.
+    assert (config.gateway_type, config.gateway_url, config.gateway_session) == ("whapi", None, "default")
     config_file.write_text('gateway_url: http://host.docker.internal:8787\nwhapi_token: "old-name"\n' + CONTACTS + CERTIFICATE,
                            encoding="utf-8")
     config = load_config(config_file)
     assert (config.gateway_url, config.gateway_token) == ("http://host.docker.internal:8787", "old-name")
+    config_file.write_text("gateway_type: waha\ngateway_url: http://host.docker.internal:3000\ngateway_session: bot\n"
+                           + CONTACTS + CERTIFICATE, encoding="utf-8")
+    config = load_config(config_file)
+    assert (config.gateway_type, config.gateway_url, config.gateway_session) == ("waha", "http://host.docker.internal:3000", "bot")
     config_file.write_text("language: pt-br\n" + CONTACTS + CERTIFICATE, encoding="utf-8")
     assert load_config(config_file).languages == {"5511900000001": "en", "5511900000010": "pt-br", "5511900000011": "pt-br"}
 
@@ -976,6 +980,9 @@ def test_one_contact_can_be_used_by_several_certificates(config_file):
     "whapi_token: has space\n" + CONTACTS + CERTIFICATE,
     'gateway_token: "one"\nwhapi_token: "two"\n' + CONTACTS + CERTIFICATE,         # the same setting under both names
     "gateway_url: http://bridge.example/path\n" + CONTACTS + CERTIFICATE,
+    "gateway_type: telegram\n" + CONTACTS + CERTIFICATE,                           # no adapter with this name
+    "gateway_type: waha\n" + CONTACTS + CERTIFICATE,                               # a hosted gateway needs its address
+    "gateway_session: has space\n" + CONTACTS + CERTIFICATE,
     "gateway_url: http://user:secret@bridge.example\n" + CONTACTS + CERTIFICATE,
     "tunnel_token: 12345\n" + CONTACTS + CERTIFICATE,
     "public_url: http://bot.example.com\n" + CONTACTS + CERTIFICATE,

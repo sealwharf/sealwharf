@@ -15,7 +15,7 @@ Send a PDF or Word document and get it back digitally signed. Sealwharf runs on 
 ## What you need
 
 - A computer with [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker with Compose on Linux).
-- A channel on [Whapi.Cloud](https://whapi.cloud), connected to the WhatsApp number that will be the bot.
+- A WhatsApp *gateway* linked to the number that will be the bot: a channel on [Whapi.Cloud](https://whapi.cloud), or [WAHA](https://waha.devlike.pro) running on your computer. Step 3 explains both.
 - A domain managed by [Cloudflare](https://dash.cloudflare.com), to give the bot a fixed address.
 - Your certificate: a `.p12` or `.pfx` file with its password, or a USB token with its PIN.
 
@@ -35,9 +35,18 @@ Cloudflare shows a command to install a program. **Do not install anything.** Ju
 
 ### 3. Get the WhatsApp token
 
-The bot reaches WhatsApp through a *gateway*. The usual one is Whapi.Cloud: in its dashboard, open your channel and copy its **API token**. The channel must be connected (QR code scanned).
+The bot reaches WhatsApp through a *gateway*: a service that links to the WhatsApp account and carries the messages. Choose one.
 
-Any other gateway that speaks the same API works too. Use its token here and add its address to the configuration in step 4, in a line such as `gateway_url: http://host.docker.internal:8787`.
+| Gateway | Cost | Where it runs |
+| --- | --- | --- |
+| Whapi.Cloud | Paid; the free plan allows few conversations | On their servers; nothing to install |
+| WAHA | Free | On your computer, in Docker |
+
+**Whapi.Cloud.** In its dashboard, open your channel and copy its **API token**. The channel must be connected (QR code scanned).
+
+**WAHA.** Follow [Using WAHA as the gateway](#using-waha-as-the-gateway) further down, then come back here.
+
+Both are unofficial ways to use WhatsApp. WhatsApp may block numbers that send bulk or unwanted messages; a bot that only answers the people who write to it is the intended use.
 
 ### 4. Fill in the configuration
 
@@ -45,7 +54,7 @@ Create a folder named `certificates` inside `config/` and copy your certificate 
 
 ```yaml
 public_url: https://bot.example.com        # the address you will create in step 5
-gateway_token: "the token from step 3"
+gateway_token: "the token from step 3"   # with WAHA, also add the gateway_type and gateway_url lines
 tunnel_token: "the token from step 2"
 
 contacts:
@@ -332,6 +341,79 @@ docker compose --profile token up -d
 docker compose run --rm sealwharf token-retry
 ```
 
+## Using WAHA as the gateway
+
+[WAHA](https://waha.devlike.pro) is a free gateway that runs on your computer. It links to WhatsApp the same way WhatsApp Web does. It is a separate program, so it gets a folder of its own.
+
+### 1. Create the WAHA folder
+
+Outside this project, create a folder named `waha`. Inside it, create a file named `compose.yaml` with this content:
+
+```yaml
+name: waha
+
+services:
+  waha:
+    image: devlikeapro/waha:gows-2026.10.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"   # reachable from this computer only
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: GOWS
+      WAHA_API_KEY: ${WAHA_API_KEY:?Set WAHA_API_KEY in the .env file}
+      WAHA_DASHBOARD_USERNAME: admin
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD:?Set WAHA_DASHBOARD_PASSWORD in the .env file}
+      WHATSAPP_SWAGGER_ENABLED: "false"
+      WHATSAPP_RESTART_ALL_SESSIONS: "True"
+      # Fetch only PDF and DOCX files; pictures, audio and video are never downloaded.
+      WAHA_EVENTS_DOWNLOAD_MEDIA_MIMETYPES: application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      WHATSAPP_FILES_LIFETIME: "3600"
+      WAHA_LOG_LEVEL: warn
+      WAHA_HTTP_LOG_LEVEL: error
+    volumes:
+      - sessions:/app/.sessions
+
+volumes:
+  sessions:
+```
+
+In the same folder, create a file named `.env` with two long random texts of your own, without spaces:
+
+```
+WAHA_API_KEY=replace-with-a-long-random-text
+WAHA_DASHBOARD_PASSWORD=replace-with-another-long-random-text
+```
+
+### 2. Start WAHA
+
+In a terminal inside the `waha` folder:
+
+```bash
+docker compose up -d
+```
+
+### 3. Link the WhatsApp account
+
+Open <http://localhost:3000/dashboard> and sign in with the user `admin` and the password from `.env`. If the dashboard asks for an API key, give it the `WAHA_API_KEY` value. Start the session named `default` and link it with the phone: **WhatsApp → Linked devices → Link a device**. The [WAHA quick start](https://waha.devlike.pro/docs/overview/quick-start/) shows these screens.
+
+The session is ready when its status is `WORKING`.
+
+### 4. Tell the bot to use WAHA
+
+In `config/sealwharf.yaml`, use these three lines for the gateway:
+
+```yaml
+gateway_type: waha
+gateway_url: http://host.docker.internal:3000
+gateway_token: "the WAHA_API_KEY value"
+```
+
+`host.docker.internal` is how a container reaches your computer with Docker Desktop. With another setup, use an address the bot's container can reach. If you named the session something other than `default`, add `gateway_session: that-name`.
+
+Then go on with step 4 of the setup. The bot registers itself in WAHA when it starts; there is nothing else to configure there.
+
+After the computer restarts, WAHA must be running before the bot starts. WhatsApp changes from time to time, so update WAHA when it stops working: change the version in the `image:` line (see the [WAHA releases](https://github.com/devlikeapro/waha/releases)) and run `docker compose pull` and `docker compose up -d`.
+
 ## When something goes wrong
 
 Start with the check. It names the problem in plain words:
@@ -342,7 +424,7 @@ docker compose run --rm sealwharf check
 
 | What you see | What to do |
 | --- | --- |
-| The bot does not answer `wake up bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the WhatsApp gateway is connected (on Whapi.Cloud, the channel in its dashboard). |
+| The bot does not answer `wake up bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the gateway is linked to WhatsApp: on Whapi.Cloud the channel must be connected, on WAHA the session must be `WORKING`. |
 | `docker compose ps` shows the bot restarting | Run `docker compose logs sealwharf` and the check above. The usual causes are a mistake in the configuration or the Cloudflare route from step 5 not created yet. |
 | "I could not find a clear place to sign" | The document needs the signer's full name, as in the certificate, next to one empty signature line. The name must appear only once as a signature label. |
 | "Could not open certificate" | The password is wrong, or the certificate file is not in `config/certificates/`. |
@@ -369,7 +451,7 @@ To get exactly the same result as on your computer, do one of these:
 ## Good to know
 
 - **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact messages `wake up bot` (or its Portuguese or Spanish form) and `bot status` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
-- **Privacy.** Documents and certificates are processed on your computer. Whapi and Cloudflare only carry the messages. Certificates and passwords are never accepted through the chat: a `.p12` file sent to the bot is refused without being opened.
+- **Privacy.** Documents and certificates are processed on your computer. The gateway and Cloudflare only carry the messages. Certificates and passwords are never accepted through the chat: a `.p12` file sent to the bot is refused without being opened.
 - **Record of signatures.** Every signature is recorded with the time, who asked, who approved and the fingerprint of the document. Read the record with `docker compose exec sealwharf cat /data/audit.jsonl`.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.
 - **Expiring certificates.** From 30 days before a certificate expires, its owner gets a daily reminder.
@@ -404,6 +486,8 @@ Python 3.12 with `config/requirements-dev.txt`. The code is under `src/sealwharf
 ```bash
 python -m pytest -q
 ```
+
+**Adding a gateway.** Each gateway has one adapter in `src/sealwharf/adapters/`: a subclass of `Gateway` (see `gateway.py`) that reads the gateway's webhook calls and sends through its API. Register it in `adapters/gateways.py` and in `GATEWAY_TYPES` of `signer_config.py`. An adapter must drop a message when the gateway cannot tell which number sent it, and a test must cover that case.
 
 **Adding a language.** Each language is one file in `src/sealwharf/locales/`, named after its code. Copy `en.toml` to, say, `fr.toml`, translate the values and keep the `{placeholders}` as they are. Nothing else changes: the new code is accepted in `language` and `lang` at once. The bot refuses to start, and the tests fail, while a language file lacks an entry or uses other placeholders, so a language is never half translated.
 

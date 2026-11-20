@@ -13,7 +13,7 @@ from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 
 from sealwharf.adapters.inbox import Inbox
-from sealwharf.adapters.whapi import check_channel
+from sealwharf.adapters.whapi import check_channel, read_messages
 from sealwharf.app import create_app
 from sealwharf.check import check
 from sealwharf.healthcheck import healthy
@@ -51,15 +51,15 @@ def project(tmp_path, monkeypatch):
     return write
 
 
-def run_check(channel=lambda token, url: None):
+def run_check(channel=lambda config: None):
     lines = []
     return check(channel=channel, output=lines.append), "\n".join(lines)
 
 
 def test_check_confirms_a_working_configuration_without_printing_secrets(project):
     seen = []
-    ready, report = run_check(lambda token, url: seen.append((token, url)))
-    assert ready and seen == [("gateway-secret", "https://gate.whapi.cloud")]
+    ready, report = run_check(lambda config: seen.append((config.gateway_type, config.gateway_token)))
+    assert ready and seen == [("whapi", "gateway-secret")]
     assert "certificate john: opens and matches its name" in report and "WhatsApp gateway is connected" in report
     assert report.endswith("Ready to start.")
     for secret in ("correct horse", "gateway-secret", "tunnel-secret"):
@@ -81,7 +81,7 @@ def test_check_lists_every_problem_at_once(project):
 def test_check_reports_name_mismatch_channel_failure_and_unreadable_file(project):
     project(name="Jane Doe")
 
-    def refused(token, url):
+    def refused(config):
         raise ValueError("The gateway is not connected to WhatsApp. Link the WhatsApp account in the gateway.")
     ready, report = run_check(refused)
     assert not ready and "does not match certificate john" in report and "gateway is not connected" in report
@@ -111,7 +111,7 @@ def test_webhook_secret_is_created_once_in_the_data_folder(project, tmp_path):
 
 def test_readiness_follows_the_worker_heartbeat(tmp_path):
     database = tmp_path / "inbox.db"
-    client = TestClient(create_app(secret=SECRET, sender="5511900000001", db_path=database))
+    client = TestClient(create_app(read=read_messages, secret=SECRET, sender="5511900000001", db_path=database))
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/ready").status_code == 503
     inbox = Inbox(database)

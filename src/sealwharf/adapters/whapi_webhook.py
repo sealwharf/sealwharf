@@ -15,6 +15,8 @@ from typing import Any
 
 import httpx
 
+from .gateway import GatewayError
+
 PUBLIC_URL = re.compile(r"https://[a-z0-9]([a-z0-9.-]{0,250}[a-z0-9])?")
 HEADER = "X-Sealwharf-Secret"
 # These settings have documented defaults or control callback reliability.
@@ -28,7 +30,7 @@ SNAPSHOT_FIELDS = frozenset({
 })
 
 
-class WebhookSettingsError(Exception):
+class WebhookSettingsError(GatewayError):
     """A webhook update could not safely be prepared."""
 
 

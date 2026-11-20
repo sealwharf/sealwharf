@@ -13,6 +13,7 @@ from typing import NamedTuple
 
 from ..authorization import canonical_number
 from ..messages import normalized, phrase_kind
+from .gateway import Incoming
 from .locking import WorkerLock, worker_lock_path
 
 ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
@@ -89,52 +90,37 @@ def asks_verification(caption: object) -> bool:
     return phrase_kind(caption, ("verify",)) is not None
 
 
-def accepted_events(payload: object, senders: frozenset[str]) -> list[Job]:
-    """Keep documents, the wake phrase and answers sent directly by configured numbers; drop everything else."""
-    if not isinstance(payload, dict):
-        return []
-    event = payload.get("event")
-    if not isinstance(event, dict) or event.get("type") != "messages" or event.get("event") != "post":
-        return []
-    messages = payload.get("messages")
-    if not isinstance(messages, list):
-        return []
+def accepted_events(messages: list[Incoming], senders: frozenset[str]) -> list[Job]:
+    """Keep documents, the wake phrase and answers sent directly by configured numbers; drop everything else.
+
+    The gateway adapter already reduced the webhook call to direct messages from other people.
+    """
     result = []
     for message in messages:
-        if not isinstance(message, dict):
+        if (not isinstance(message, Incoming) or not isinstance(message.address, str)
+                or not isinstance(message.message_id, str) or not ID_PATTERN.fullmatch(message.message_id)):
             continue
-        chat_id = message.get("chat_id")
-        if not isinstance(chat_id, str) or not chat_id.endswith("@s.whatsapp.net"):
+        sender = canonical_number(message.address)
+        seen = message.address if message.address != sender else None
+        if sender not in senders:
             continue
-        address = chat_id.removesuffix("@s.whatsapp.net")
-        sender = canonical_number(address)
-        seen = address if address != sender else None
-        message_id = message.get("id")
-        if (sender not in senders or message.get("from_me") is not False or message.get("from") not in (None, address)
-                or not isinstance(message_id, str) or not ID_PATTERN.fullmatch(message_id)):
-            continue
-        if message.get("type") == "text":
-            text = message.get("text")
-            command = parse_command(text.get("body") if isinstance(text, dict) else None)
+        if message.media_id is None:
+            command = parse_command(message.text)
             if command is not None:
-                result.append(Job(message_id, "", None, sender, "text", command, seen))
+                result.append(Job(message.message_id, "", None, sender, "text", command, seen))
             continue
-        document = message.get("document")
-        if message.get("type") != "document" or not isinstance(document, dict):
+        if not isinstance(message.media_id, str) or not ID_PATTERN.fullmatch(message.media_id):
             continue
-        media_id = document.get("id")
-        if not isinstance(media_id, str) or not ID_PATTERN.fullmatch(media_id):
-            continue
-        filename = document.get("file_name") or document.get("filename")
+        filename = message.filename
         if not isinstance(filename, str) or not filename.strip() or len(filename) > 1024:
             filename = None
-        mime = document.get("mime_type")
+        mime = message.mime_type
         if (filename and SECRET_FILE.search(filename.strip())) or (isinstance(mime, str) and "pkcs12" in mime.casefold()):
             # Key material must never be fetched, stored or processed.
-            result.append(Job(message_id, "", None, sender, "refused", None, seen))
+            result.append(Job(message.message_id, "", None, sender, "refused", None, seen))
             continue
-        body = "verify" if asks_verification(document.get("caption")) else None
-        result.append(Job(message_id, media_id, filename, sender, "document", body, seen))
+        body = "verify" if asks_verification(message.caption) else None
+        result.append(Job(message.message_id, message.media_id, filename, sender, "document", body, seen))
     return result
 
 

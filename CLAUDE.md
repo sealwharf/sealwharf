@@ -28,8 +28,10 @@ command a reader needs.
 - `src/sealwharf/application/`: `signers.py` opens the certificates;
   `worker.py` is the request flow (roles, owner approval, sequential
   signatures, commands, audit).
-- `src/sealwharf/adapters/`: Whapi, webhook settings, inbox queue, audit
-  record, worker lock and the local AI model.
+- `src/sealwharf/adapters/`: the WhatsApp gateways (`gateway.py` is what the bot
+  needs from any of them, `gateways.py` lists the adapters, `whapi.py` and
+  `waha.py` are one adapter each), inbox queue, audit record, worker lock and
+  the local AI model.
 - `src/sealwharf/session.py`, `check.py`, `token_tools.py`, `healthcheck.py`,
   `__main__.py`: container entry points (`run`, `check`, `token-driver`,
   `token-check`, `token-retry`, `healthcheck`).
@@ -69,6 +71,9 @@ docker build -t sealwharf:local .
   document is still checked against its own hash before it is signed.
 - A waiting question is never dropped in silence: it is asked, expires after
   being asked, or its requester is told why it was closed.
+- A gateway adapter reports the number WhatsApp gives for a sender and drops the
+  message when the gateway cannot tell it. Only the inbox decides who may use
+  the bot. A new adapter needs a test for the unknown sender.
 - Secrets live only in `config/sealwharf.yaml` and never appear in logs, error
   messages, backups or `repr` output. Operational logs carry no phone numbers,
   names, file names or document content.

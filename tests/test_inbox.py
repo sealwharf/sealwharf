@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi.testclient import TestClient
 
 from sealwharf.adapters.inbox import Inbox
+from sealwharf.adapters.whapi import read_messages
 from sealwharf.app import create_app
 
 SENDER = "5511999999999"
@@ -17,7 +18,7 @@ def event():
 
 def test_auth_dedup_and_rejections(tmp_path):
     path = tmp_path / "inbox.db"
-    client = TestClient(create_app(secret=SECRET, sender=SENDER, db_path=path))
+    client = TestClient(create_app(read=read_messages, secret=SECRET, sender=SENDER, db_path=path))
     assert client.post("/webhook", json=event()).status_code == 401
     headers = {"x-sealwharf-secret": SECRET}
     assert client.post("/webhook", json=event(), headers=headers).status_code == 200
@@ -41,22 +42,23 @@ def test_concurrent_insertion(tmp_path):
 
 
 def test_limit(tmp_path):
-    client = TestClient(create_app(secret=SECRET, sender=SENDER, db_path=tmp_path / "db"))
-    assert client.post("/webhook", content=b"x" * (256 * 1024 + 1), headers={"x-sealwharf-secret": SECRET}).status_code == 413
+    client = TestClient(create_app(read=read_messages, secret=SECRET, sender=SENDER, db_path=tmp_path / "db"))
+    assert client.post("/webhook", content=b"x" * (2 * 1024 * 1024 + 1), headers={"x-sealwharf-secret": SECRET}).status_code == 413
 
 
 def test_alternate_filename_and_missing_filename():
     from sealwharf.adapters.inbox import Job, accepted_events
+    from sealwharf.adapters.whapi import read_messages
     payload = event()
     payload["messages"][0]["document"] = {"id": "media-1", "filename": "contract.pdf"}
-    assert accepted_events(payload, frozenset({SENDER})) == [Job("message-1", "media-1", "contract.pdf", SENDER)]
+    assert accepted_events(read_messages(payload), frozenset({SENDER})) == [Job("message-1", "media-1", "contract.pdf", SENDER)]
     payload["messages"][0]["document"] = {"id": "media-1"}
-    assert accepted_events(payload, frozenset({SENDER})) == [Job("message-1", "media-1", None, SENDER)]
+    assert accepted_events(read_messages(payload), frozenset({SENDER})) == [Job("message-1", "media-1", None, SENDER)]
 
 
 def test_multiple_authorized_senders_and_mismatched_identifiers(tmp_path):
     other = "5511888888888"
-    client = TestClient(create_app(secret=SECRET, sender=frozenset({SENDER, other}), db_path=tmp_path / "inbox.db"))
+    client = TestClient(create_app(read=read_messages, secret=SECRET, sender=frozenset({SENDER, other}), db_path=tmp_path / "inbox.db"))
     headers = {"x-sealwharf-secret": SECRET}
     first = event()
     second = event()

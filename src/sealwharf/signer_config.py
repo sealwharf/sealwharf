@@ -17,6 +17,10 @@ from .messages import DEFAULT_LANGUAGE, LANGUAGES, resolve_language
 
 NUMBER = re.compile(r"[0-9]{9,15}")
 PUBLIC_URL = re.compile(r"https://[a-z0-9]([a-z0-9.-]{0,250}[a-z0-9])?")
+# `whapi_token` is the earlier name of `gateway_token` and is still read.
+SETTINGS = ("public_url", "gateway_type", "gateway_url", "gateway_token", "gateway_session", "tunnel_token", "language",
+            "contacts", "certificates", "limits", "whapi_token")
+GATEWAY_TYPES = ("whapi", "waha")  # one adapter each, in adapters/gateways.py
 SERVICE_URL = re.compile(r"https?://[A-Za-z0-9]([A-Za-z0-9.-]{0,250}[A-Za-z0-9])?(:[0-9]{1,5})?")
 ENTRY_KEYS = frozenset({"id", "name", "file", "password", "owner", "preparers", "trusted", "visual_review", "logo", "logo_scale",
                         "timestamp_url", "trust_roots", "aliases", "token"})
@@ -73,8 +77,10 @@ class AppConfig:
     tunnel_token: str | None = field(default=None, repr=False)
     # Contacts with an hourly limit of their own, for people who send documents in bulk.
     request_limits: dict[str, int] = field(default_factory=dict)
-    # Where the WhatsApp gateway is served. Any service that speaks the Whapi API works; Whapi.Cloud is the default.
-    gateway_url: str = "https://gate.whapi.cloud"
+    # The WhatsApp gateway: which adapter talks to it and, for one you host, where it is and its session name.
+    gateway_url: str | None = None
+    gateway_type: str = "whapi"
+    gateway_session: str = "default"
 
     @property
     def senders(self) -> frozenset[str]:
@@ -93,10 +99,8 @@ def load_config(path: Path) -> AppConfig:
             config = yaml.safe_load(stream)
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError("Could not read the configuration file.") from exc
-    if not isinstance(config, dict) or set(config) - {"public_url", "gateway_token", "gateway_url", "whapi_token", "tunnel_token", "language", "contacts",
-                                                      "certificates", "limits"}:
-        raise ValueError("The configuration may contain only public_url, gateway_token, gateway_url, tunnel_token, language, contacts, "
-                         "certificates and limits.")
+    if not isinstance(config, dict) or set(config) - set(SETTINGS):
+        raise ValueError("The configuration may contain only " + ", ".join(SETTINGS[:-2]) + " and " + SETTINGS[-2] + ".")
     default_language = resolve_language(str(config.get("language", DEFAULT_LANGUAGE)))
     if default_language is None:
         raise ValueError("language must be one of: " + ", ".join(LANGUAGES) + ".")
@@ -112,8 +116,16 @@ def load_config(path: Path) -> AppConfig:
     if tokens["gateway_token"] is not None and tokens["whapi_token"] is not None:
         raise ValueError("Use gateway_token alone; whapi_token is its earlier name.")
     gateway_token = tokens["gateway_token"] or tokens["whapi_token"]
-    gateway_url = config.get("gateway_url", AppConfig.gateway_url)
-    if not isinstance(gateway_url, str) or not SERVICE_URL.fullmatch(gateway_url):
+    gateway_type = config.get("gateway_type", AppConfig.gateway_type)
+    if gateway_type not in GATEWAY_TYPES:
+        raise ValueError("gateway_type must be one of: " + ", ".join(GATEWAY_TYPES) + ".")
+    gateway_session = config.get("gateway_session", AppConfig.gateway_session)
+    if not isinstance(gateway_session, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,54}", gateway_session):
+        raise ValueError("gateway_session must be a short name of letters, digits, underscores or hyphens.")
+    gateway_url = config.get("gateway_url")
+    if gateway_url is None and gateway_type != "whapi":
+        raise ValueError(f"gateway_url is missing: a {gateway_type} gateway needs its address.")
+    if gateway_url is not None and (not isinstance(gateway_url, str) or not SERVICE_URL.fullmatch(gateway_url)):
         raise ValueError("gateway_url must be the address of the WhatsApp gateway, such as http://host.docker.internal:8787, "
                          "with nothing after it.")
     entries = config.get("certificates")
@@ -138,7 +150,7 @@ def load_config(path: Path) -> AppConfig:
         raise ValueError("Limits must be whole numbers: 1-1000 requests per hour and 1-60 confirmation minutes.")
     request_limits = {contact.number: contact.limit for contact in contacts.values() if contact.limit is not None}
     return AppConfig(signers, languages, contact_names, per_hour, minutes, public_url, gateway_token, tokens["tunnel_token"],
-                     request_limits, gateway_url)
+                     request_limits, gateway_url, gateway_type, gateway_session)
 
 
 def _parse_contacts(value: object, default_language: str) -> dict[str, Contact]:

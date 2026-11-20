@@ -6,13 +6,22 @@ A token is asked for its PIN at most once, under the same guard as the bot.
 
 import sys
 
-from .adapters.whapi import check_channel
+from .adapters.gateways import open_gateway
 from .application.signers import unlock_signers
 from .paths import config_path, data_dir
 from .signer_config import load_config
 
 
-def check(*, channel=check_channel, output=print) -> bool:
+def check_gateway(config) -> None:
+    """Raise ValueError unless the configured gateway accepts its token and is linked to WhatsApp."""
+    gateway = open_gateway(config)
+    try:
+        gateway.check()
+    finally:
+        gateway.close()
+
+
+def check(*, channel=check_gateway, output=print) -> bool:
     """Report on each part of the configuration; return True when the bot can start."""
     try:
         config = load_config(config_path())
@@ -34,7 +43,7 @@ def check(*, channel=check_channel, output=print) -> bool:
             problems += 1
     if config.gateway_token is not None:
         try:
-            channel(config.gateway_token, url=config.gateway_url)
+            channel(config)
             output("ok       WhatsApp gateway is connected")
         except ValueError as exc:
             output(f"PROBLEM  {exc}")
