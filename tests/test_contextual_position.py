@@ -17,7 +17,7 @@ from sealwharf.documents.contextual_position import suggest_contextual_position
 from sealwharf.signer_config import SignerConfig
 
 
-def form(*, signature=b"Signature:", name=b"Name: Jane Example", extra=b"", rotation=0):
+def form(*, signature=b"Signature:", name=b"Name: Jane Example", extra=b"", rotation=0, borders=None):
     writer = PdfWriter()
     page = writer.add_blank_page(width=600, height=800)
     font = DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"),
@@ -26,8 +26,8 @@ def form(*, signature=b"Signature:", name=b"Name: Jane Example", extra=b"", rota
     stream = DecodedStreamObject()
     stream.set_data(
         b"q 1 1 1 rg 0 0 600 800 re f Q "
-        b"50 400 m 50 700 l S 550 400 m 550 700 l S "
-        b"50 400 m 550 400 l S 50 460 m 550 460 l S 50 700 m 550 700 l S "
+        + (borders or b"50 400 m 50 700 l S 550 400 m 550 700 l S ")
+        + b"50 400 m 550 400 l S 50 460 m 550 460 l S 50 700 m 550 700 l S "
         b"BT /F1 12 Tf 65 650 Td (" + name + b") Tj ET "
         b"BT /F1 12 Tf 65 440 Td (" + signature + b") Tj ET " + extra
     )
@@ -46,6 +46,14 @@ def test_finds_empty_signature_row_in_named_section():
     assert candidate.context_box is not None
     assert 400 < candidate.box[1] < 440 < candidate.box[3] < 460
     assert 65 < candidate.box[0] < candidate.box[2] <= 546
+
+
+def test_side_borders_drawn_one_row_at_a_time_still_bound_the_section():
+    pieces = b"".join(b"%d %d m %d %d l S " % (x, low, x, high) for x in (50, 550) for low, high in ((400, 430), (430, 460), (460, 700)))
+    assert suggest_contextual_position(form(borders=pieces), "Jane Example") == suggest_contextual_position(form(), "Jane Example")
+    # Pieces with a gap between them are two tables, not one.
+    apart = b"".join(b"%d %d m %d %d l S " % (x, low, x, high) for x in (50, 550) for low, high in ((400, 450), (470, 700)))
+    assert suggest_contextual_position(form(borders=apart), "Jane Example") is None
 
 
 def test_general_model_suggestion_requires_geometry_and_visual_review():

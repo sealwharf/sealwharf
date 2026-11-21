@@ -53,6 +53,18 @@ def _inside(inner, outer) -> bool:
     return outer[0] <= inner[0] < inner[2] <= outer[2] and outer[1] <= inner[1] < inner[3] <= outer[3]
 
 
+def _joined(segments: list[tuple[float, float, float, float]]) -> list[tuple[float, float, float, float]]:
+    """Join vertical border pieces that touch end to end, as tables drawn one row at a time have them."""
+    joined: list[tuple[float, float, float, float]] = []
+    for piece in sorted(segments, key=lambda b: (round(b[0]), b[1])):
+        last = joined[-1] if joined else None
+        if last is not None and abs(last[0] - piece[0]) <= 1.5 and abs(last[2] - piece[2]) <= 1.5 and piece[1] <= last[3] + 1.5:
+            joined[-1] = (min(last[0], piece[0]), last[1], max(last[2], piece[2]), max(last[3], piece[3]))
+        else:
+            joined.append(piece)
+    return joined
+
+
 def _role_and_name(text: str, identity: tuple[str, ...]) -> tuple[str, ...]:
     """The role written before the signer's name, as in "Entity representative: Jane Example"; empty otherwise."""
     role, colon, name = text.rpartition(":")
@@ -97,7 +109,7 @@ def suggest_contextual_position(document: bytes, signer_name: str) -> VisualCand
                             paths.append(bounds)
                             if len(paths) > MAX_PAGE_PATHS:
                                 return None
-                vertical = [b for b in paths if b[2] - b[0] <= 3 and b[3] - b[1] >= 60]
+                vertical = [b for b in _joined([b for b in paths if b[2] - b[0] <= 3]) if b[3] - b[1] >= 60]
                 horizontal = [b for b in paths if b[2] - b[0] >= 150 and b[3] - b[1] <= 3]
                 if len(vertical) > 100 or len(horizontal) > MAX_BORDER_PATHS:
                     return None
