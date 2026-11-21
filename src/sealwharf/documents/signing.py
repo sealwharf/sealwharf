@@ -21,6 +21,20 @@ from pyhanko.keys import load_certs_from_pemder
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign import fields, signers, timestamps
+from pyhanko.sign.diff_analysis import (
+    CatalogModificationRule,
+    DocInfoRule,
+    DSSCompareRule,
+    FormUpdatingRule,
+    GenericFieldModificationRule,
+    MetadataUpdateRule,
+    ModificationLevel,
+    ObjectStreamRule,
+    SigFieldCreationRule,
+    SigFieldModificationRule,
+    StandardDiffPolicy,
+    XrefStreamRule,
+)
 from pyhanko.sign.validation import validate_pdf_signature
 from pyhanko_certvalidator import CertificateValidator, ValidationContext
 from pyhanko_certvalidator.errors import RevokedError
@@ -209,6 +223,24 @@ class SigningRequest:
     token: TokenSettings | None = None
 
 
+# pyHanko's default rules, except that a new visible signature field may follow a certification that allows
+# signing, as Acrobat accepts (pyHanko calls its own default "stricter than Acrobat"). Any other change still counts.
+ACROBAT_POLICY = StandardDiffPolicy(
+    global_rules=[
+        CatalogModificationRule(),
+        DocInfoRule().as_qualified(ModificationLevel.LTA_UPDATES),
+        XrefStreamRule().as_qualified(ModificationLevel.LTA_UPDATES),
+        ObjectStreamRule().as_qualified(ModificationLevel.LTA_UPDATES),
+        DSSCompareRule().as_qualified(ModificationLevel.LTA_UPDATES),
+        MetadataUpdateRule().as_qualified(ModificationLevel.LTA_UPDATES),
+    ],
+    form_rule=FormUpdatingRule(field_rules=[
+        SigFieldCreationRule(allow_new_visible_after_certify=True),
+        SigFieldModificationRule(),
+        GenericFieldModificationRule(),
+    ]),
+)
+
 def _hybrid(document: bytes) -> bool:
     """Whether the file has the hybrid cross-reference that Word writes, which pyHanko refuses unless allowed."""
     return PdfFileReader(BytesIO(document), strict=False).xrefs.hybrid_xrefs_present
@@ -225,7 +257,7 @@ def _sound(document: bytes) -> set[str]:
     for signature in _pdf(document).embedded_signatures:
         try:
             context = ValidationContext(trust_roots=[signature.signer_cert], allow_fetching=False)
-            status = validate_pdf_signature(signature, signer_validation_context=context)
+            status = validate_pdf_signature(signature, signer_validation_context=context, diff_policy=ACROBAT_POLICY)
             changed = status.modification_level is not None and status.modification_level.name == "OTHER"
             if status.intact and status.valid and not changed:
                 sound.add(signature.field_name)
@@ -265,7 +297,7 @@ def sign_pdf_sequence(document: bytes, requests: tuple[SigningRequest, ...]) -> 
             raise SigningError("One or more signatures are missing.")
         for signature in selected:
             context = ValidationContext(trust_roots=[signature.signer_cert], allow_fetching=False)
-            status = validate_pdf_signature(signature, signer_validation_context=context)
+            status = validate_pdf_signature(signature, signer_validation_context=context, diff_policy=ACROBAT_POLICY)
             if not status.intact or not status.valid:
                 raise SigningError("Cryptographic signature verification failed.")
         return result
@@ -322,6 +354,8 @@ def sign_pdf(document: bytes, certificate: Path | None, password: bytes, positio
                             matches.append((page_number, tuple(float(value) for value in widget.get("/Rect", []))))
                 if matches != [(position.page, tuple(position.box))]:
                     raise SigningError("Signature field is missing, ambiguous or incompatible.")
+            if any(signature.docmdp_level == fields.MDPPerm.NO_CHANGES for signature in _pdf(document).embedded_signatures):
+                raise BreaksSignature("A certification in the document allows no change, not even a signature.")
             before = _sound(document)
             writer = IncrementalPdfFileWriter(BytesIO(document), strict=not _hybrid(document))
             if chain_context is not None:
@@ -343,7 +377,7 @@ def sign_pdf(document: bytes, certificate: Path | None, password: bytes, positio
             signed_reader = _pdf(result)
             signature = next(sig for sig in signed_reader.embedded_signatures if sig.field_name == field_name)
             context = ValidationContext(trust_roots=[signer.signing_cert], allow_fetching=False)
-            status = validate_pdf_signature(signature, signer_validation_context=context)
+            status = validate_pdf_signature(signature, signer_validation_context=context, diff_policy=ACROBAT_POLICY)
             if not status.intact or not status.valid:
                 raise SigningError("Cryptographic signature verification failed.")
             # Another person's signature must stay valid: a certification may forbid adding a signature field.

@@ -14,6 +14,7 @@ from pyhanko.sign.validation import validate_pdf_signature
 from pyhanko_certvalidator import ValidationContext
 
 from ..messages import DEFAULT_LANGUAGE, text
+from .signing import ACROBAT_POLICY
 from .validation import validate_pdf
 
 MAX_SIGNATURES = 50
@@ -40,7 +41,7 @@ def verify_signatures(document: bytes) -> list[SignatureReport]:
             certificate = signature.signer_cert
             name = certificate.subject.native.get("common_name")
             context = ValidationContext(trust_roots=[certificate], allow_fetching=False)
-            status = validate_pdf_signature(signature, signer_validation_context=context)
+            status = validate_pdf_signature(signature, signer_validation_context=context, diff_policy=ACROBAT_POLICY)
             changed = status.modification_level is not None and status.modification_level.name == "OTHER"
             signed_at = status.signer_reported_dt
             moment = signed_at or datetime.now(certificate.not_valid_after.tzinfo)
