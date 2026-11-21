@@ -76,7 +76,7 @@ def make_pdf(*names, password=None, text=None):
 
 
 # The reminder that follows every message that comes with a signed document.
-REVIEW = {code: "\n" + text(code, "review_reminder") for code in ("en", "pt-br", "es")}
+REVIEW = {code: "\n" + message_text(code, "review_reminder") for code in ("en", "pt-br", "es")}
 
 
 class Chat:
