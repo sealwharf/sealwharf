@@ -34,7 +34,11 @@ Open a terminal inside the project folder. Every command below is run from there
 
 In the Cloudflare dashboard, open **Networking → Tunnels** and create a tunnel. Give it any name.
 
-Cloudflare shows a command to install a program. **Do not install anything.** Just copy the long text at the end of that command, starting with `eyJ`: that is the *tunnel token*. Leave the page open; you will come back to it in step 5.
+Cloudflare shows a command to install a program. **Do not install anything.** Just copy the long text at the end of that command, starting with `eyJ`: that is the *tunnel token*.
+
+In the project folder, create a file named `tunnel-token` inside `config/` and paste the token into it, alone, on one line. The file has no extension: in Notepad, choose **Save as type: All files** so it is not saved as `tunnel-token.txt`. Git ignores it, like the rest of `config/`.
+
+Leave the Cloudflare page open; you will come back to it in step 5.
 
 ### 3. Get the WhatsApp token
 
@@ -58,7 +62,6 @@ Create a folder named `certificates` inside `config/` and copy your certificate 
 ```yaml
 public_url: https://bot.example.com        # the address you will create in step 5
 gateway_token: "the token from step 3"   # with WAHA, also add the gateway_type and gateway_url lines
-tunnel_token: "the token from step 2"
 
 contacts:
   john:
@@ -92,7 +95,7 @@ docker compose up -d
 Go back to the Cloudflare page: the tunnel now appears as connected. Continue, choose **Add route → Published application**, and fill in:
 
 - **Subdomain and domain:** the address you wrote in `public_url`, for example `bot` + `example.com`.
-- **Service URL:** `http://localhost:8000`
+- **Service URL:** `http://sealwharf:8000` (the tunnel runs in a container of its own and reaches the bot by that name)
 
 A minute later the bot is ready. To confirm, send it the words `wake up bot` from your WhatsApp (or `acorda bot`, or `despierta bot`): it answers with a short, playful line, such as "I'm awake, just resting my eyes."
 
@@ -432,7 +435,8 @@ docker compose run --rm sealwharf check
 | What you see | What to do |
 | --- | --- |
 | The bot does not answer `wake up bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the gateway is linked to WhatsApp: on Whapi.Cloud the channel must be connected, on WAHA the session must be `WORKING`. |
-| `docker compose ps` shows the bot restarting | Run `docker compose logs sealwharf` and the check above. The usual causes are a mistake in the configuration or the Cloudflare route from step 5 not created yet. |
+| `docker compose ps` shows the bot restarting | Run `docker compose logs sealwharf` and the check above. The usual causes are a mistake in the configuration or the Cloudflare route from step 5 not created yet, or pointing to another address than `http://sealwharf:8000`. Run `docker compose logs tunnel` to see the tunnel. |
+| "tunnel_token now has a file of its own" | Move the token from `config/sealwharf.yaml` into `config/tunnel-token`, alone, and delete the `tunnel_token` line. In the Cloudflare route, change the service to `http://sealwharf:8000`. |
 | "I could not find a clear place to sign" | The document needs the signer's full name, as in the certificate, near one empty place to sign. The name must appear only once as a signature label. |
 | "I did not find in this document the full name of anyone" | The names in the document differ from the certificates, for example with a middle name left out. Add that spelling to the certificate with `aliases`. |
 | `docker compose ps` shows the bot waiting, or "reaching the local AI model" in its logs | The AI model is still downloading or did not start. Run `docker compose up model` to see the download, and `docker compose ps ollama` to check the model service. |

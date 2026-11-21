@@ -1,4 +1,4 @@
-"""Container entry point: tunnel connector, webhook server and signing worker."""
+"""Container entry point: webhook server and signing worker. The tunnel runs in a container of its own."""
 
 import hashlib
 import os
@@ -95,7 +95,7 @@ def main() -> None:
         sys.exit("SEALWHARF_ALLOW_SETTINGS_DEFAULTS must be true or false.")
     try:
         config = load_config(config_path())
-        for key in ("public_url", "gateway_token", "tunnel_token"):
+        for key in ("public_url", "gateway_token"):
             if getattr(config, key) is None:
                 raise ValueError(f"{key} is missing from the configuration.")
         signers = unlock_signers(config.signers, data_dir=data)
@@ -108,7 +108,7 @@ def main() -> None:
     backup_configuration(config_path(), data)
     runtime = Runtime(data, config.requests_per_hour, config.confirmation_minutes, config.languages, config.names,
                       config.request_limits, log_days=config.log_days, timezone=config.timezone)
-    server = tunnel = None
+    server = None
     model = LocalModelSession()
     db_path = data / "inbox.db"
     worker_lock = WorkerLock.for_database(db_path)
@@ -133,8 +133,7 @@ def main() -> None:
                 time.sleep(0.1)
         else:
             raise RuntimeError("The webhook did not become ready")
-        stage = "connecting the tunnel"
-        tunnel = _start(["cloudflared", "tunnel", "--no-autoupdate", "run"], TUNNEL_TOKEN=config.tunnel_token)
+        stage = "waiting for the tunnel to publish the public address"
         wait_for_public_health(config.public_url)
         stage = "configuring the gateway webhook"
         client.connect_webhook(config.public_url, secret, allow_incomplete_snapshot=allow_defaults == "true")
@@ -142,8 +141,8 @@ def main() -> None:
         stage = "processing documents"
         last_warning = 0.0
         while True:
-            if server.poll() is not None or tunnel.poll() is not None:
-                raise RuntimeError("The webhook or the tunnel stopped")
+            if server.poll() is not None:
+                raise RuntimeError("The webhook stopped")
             inbox.set_mark("heartbeat")
             if time.time() - last_warning >= 3600:
                 warn_expiring(inbox, client, signers, config.languages)
@@ -162,7 +161,6 @@ def main() -> None:
     finally:
         client.close()
         try:
-            _stop_process(tunnel)
             _stop_process(server)
         finally:
             worker_lock.release()

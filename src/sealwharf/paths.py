@@ -9,6 +9,11 @@ def config_path() -> Path:
     return Path(os.environ.get("SEALWHARF_CONFIG", "/config/sealwharf.yaml"))
 
 
+def tunnel_token_path() -> Path:
+    """The file that holds the tunnel token alone, next to the configuration; the tunnel container reads it."""
+    return config_path().parent / "tunnel-token"
+
+
 def data_dir() -> Path:
     return Path(os.environ.get("SEALWHARF_DATA", "/data"))
 

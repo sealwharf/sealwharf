@@ -78,7 +78,8 @@ docker build -t sealwharf:local .
 - A gateway adapter reports the number WhatsApp gives for a sender and drops the
   message when the gateway cannot tell it. Only the inbox decides who may use
   the bot. A new adapter needs a test for the unknown sender.
-- Secrets live only in `config/sealwharf.yaml` and never appear in logs, error
+- Secrets live only in `config/` (`sealwharf.yaml`, and `tunnel-token`, which the
+  tunnel container reads) and never appear in logs, error
   messages, backups or `repr` output. Operational logs carry no phone numbers,
   names, file names or document content.
 - A new chat message needs a text in every language file in `locales/`; a

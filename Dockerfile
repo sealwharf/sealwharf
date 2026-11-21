@@ -31,9 +31,6 @@ RUN apt-get update \
 
 COPY docker/fonts.conf /etc/fonts/conf.d/60-sealwharf.conf
 
-# The connector that publishes the webhook at the fixed Cloudflare address.
-COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/cloudflared
-
 WORKDIR /app
 COPY config/requirements-lock.txt ./
 RUN pip install -r requirements-lock.txt

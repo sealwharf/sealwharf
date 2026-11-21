@@ -43,11 +43,12 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("SEALWHARF_DATA", str(tmp_path / "data"))
 
     def write(*, password="correct horse", name="John Doe", head='public_url: https://bot.example.com\ngateway_token: "gateway-secret"\n'
-                                                                  'tunnel_token: "tunnel-secret"\n'):
+                                                                  ''):
         config.write_text(head + 'contacts:\n  john:\n    name: John Doe\n    number: "5511900000001"\n'
                           f'certificates:\n  - id: john\n    name: {name}\n    file: certificates/john.p12\n'
                           f'    password: "{password}"\n    owner: john\n', encoding="utf-8")
     write()
+    (config.parent / "tunnel-token").write_text("tunnel-secret\n", encoding="utf-8")
     return write
 
 
@@ -73,7 +74,11 @@ def test_check_lists_every_problem_at_once(project):
         raise AssertionError("No token, so the channel must not be contacted")
     ready, report = run_check(disconnected)
     assert not ready
-    for expected in ("public_url is missing", "gateway_token is missing", "tunnel_token is missing", "Could not open certificate john"):
+    from sealwharf.paths import tunnel_token_path
+    tunnel_token_path().unlink()
+    ready, report = run_check(disconnected)
+    for expected in ("public_url is missing", "gateway_token is missing", "config/tunnel-token must hold the tunnel token, alone",
+                     "Could not open certificate john"):
         assert expected in report
     assert report.endswith("4 problem(s) to fix in config/sealwharf.yaml.") and "wrong" not in report.replace("wrong PIN", "")
 
@@ -150,7 +155,7 @@ def test_configuration_backup_keeps_one_copy_per_version_and_no_secrets(project,
     first = backup_configuration(source, tmp_path / "data")
     saved = first.read_text(encoding="utf-8")
     assert backup_configuration(source, tmp_path / "data") == first
-    assert "id: john" in saved and "5511900000001" in saved and "owner: john" in saved and saved.count("REDACTED") == 3
+    assert "id: john" in saved and "5511900000001" in saved and "owner: john" in saved and saved.count("REDACTED") == 2
     for secret in ("correct horse", "gateway-secret", "tunnel-secret"):
         assert secret not in saved
     # Changing only a secret is not a new version; changing a setting is.

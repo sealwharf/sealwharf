@@ -25,6 +25,20 @@ services:
       model:
         condition: service_completed_successfully
 
+  # Publishes the webhook at the fixed public address, from the official Cloudflare image.
+  # In the Cloudflare route, the service is http://sealwharf:8000. Its token is config/tunnel-token.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/tunnel_token"]
+    secrets:
+      - tunnel_token
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   # Optional smart-card reader for USB tokens: docker compose --profile token up -d
   reader:
     profiles: [token]
@@ -62,6 +76,10 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+
+secrets:
+  tunnel_token:
+    file: ./config/tunnel-token
 
 volumes:
   data:

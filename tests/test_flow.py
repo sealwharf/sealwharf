@@ -1015,13 +1015,13 @@ def config_file(tmp_path):
 
 
 def test_configuration_defines_contacts_roles_tokens_and_languages(config_file):
-    config_file.write_text('public_url: https://bot.example.com\ngateway_token: "gateway-secret"\ntunnel_token: "tunnel-secret"\n'
+    config_file.write_text('public_url: https://bot.example.com\ngateway_token: "gateway-secret"\n'
                            + CONTACTS + CERTIFICATE + '    preparers: [paulo]\n    trusted: [tina]\n'
                            'limits:\n  requests_per_hour: 7\n  confirmation_minutes: 3\n', encoding="utf-8")
     config = load_config(config_file)
     signer = config.signers[0]
     assert (config.requests_per_hour, config.confirmation_minutes) == (7, 3)
-    assert (config.public_url, config.gateway_token, config.tunnel_token) == ("https://bot.example.com", "gateway-secret", "tunnel-secret")
+    assert (config.public_url, config.gateway_token) == ("https://bot.example.com", "gateway-secret")
     assert config.senders == {"5511900000001", "5511900000010", "5511900000011"} and signer.owner == "5511900000001"
     assert config.names == {"5511900000001": "Ana Owner", "5511900000010": "Paulo Preparer"}
     # A contact without its own lang uses the language of the file, which is English unless set.
@@ -1073,7 +1073,7 @@ def test_one_contact_can_be_used_by_several_certificates(config_file):
     "gateway_type: waha\n" + CONTACTS + CERTIFICATE,                               # a hosted gateway needs its address
     "gateway_session: has space\n" + CONTACTS + CERTIFICATE,
     "gateway_url: http://user:secret@bridge.example\n" + CONTACTS + CERTIFICATE,
-    "tunnel_token: 12345\n" + CONTACTS + CERTIFICATE,
+    'tunnel_token: "moved"\n' + CONTACTS + CERTIFICATE,                           # the tunnel token has a file of its own
     "public_url: http://bot.example.com\n" + CONTACTS + CERTIFICATE,
 ])
 def test_configuration_mistakes_are_refused(config_file, broken):

@@ -1,5 +1,6 @@
 # Copy this file to config/sealwharf.yaml and fill it in. It is the only file to edit.
 # It holds passwords and tokens, so keep it private; Git ignores it.
+# The Cloudflare tunnel token goes alone in a file of its own: config/tunnel-token.
 # After editing, check it with: docker compose run --rm sealwharf check
 
 public_url: https://bot.example.com # the public hostname of your Cloudflare tunnel
@@ -10,7 +11,6 @@ gateway_token: "paste-the-api-token-of-the-channel"
 # gateway_url: http://host.docker.internal:3000
 # gateway_token: "paste-the-waha-api-key"
 # gateway_session: default      # only when the WAHA session has another name
-tunnel_token: "paste-the-cloudflare-tunnel-token"
 language: en                        # en, pt-br or es; used for contacts that set no lang of their own
 # timezone: Asia/Tokyo              # for the times shown in the chat; without it, the time zone of the server
 

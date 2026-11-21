@@ -10,7 +10,7 @@ from .adapters.gateways import open_gateway
 from .adapters.local_ai import MODEL
 from .adapters.model_runtime import model_status
 from .application.signers import unlock_signers
-from .paths import config_path, data_dir
+from .paths import config_path, data_dir, tunnel_token_path
 from .signer_config import load_config
 
 
@@ -31,10 +31,17 @@ def check(*, channel=check_gateway, model=model_status, output=print) -> bool:
         output(f"PROBLEM  configuration: {exc}")
         return False
     problems = 0
-    for key in ("public_url", "gateway_token", "tunnel_token"):
+    for key in ("public_url", "gateway_token"):
         if getattr(config, key) is None:
             output(f"PROBLEM  {key} is missing")
             problems += 1
+    try:
+        token = tunnel_token_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        token = ""
+    if not token or any(character.isspace() for character in token):
+        output("PROBLEM  config/tunnel-token must hold the tunnel token, alone")
+        problems += 1
     output(f"ok       {len(config.signers)} certificate(s), {len(config.senders)} number(s)")
     for signer in config.signers:
         try:

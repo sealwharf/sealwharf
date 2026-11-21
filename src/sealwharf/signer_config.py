@@ -19,7 +19,7 @@ from .messages import DEFAULT_LANGUAGE, LANGUAGES, resolve_language
 NUMBER = re.compile(r"[0-9]{9,15}")
 PUBLIC_URL = re.compile(r"https://[a-z0-9]([a-z0-9.-]{0,250}[a-z0-9])?")
 # `whapi_token` is the earlier name of `gateway_token` and is still read.
-SETTINGS = ("public_url", "gateway_type", "gateway_url", "gateway_token", "gateway_session", "tunnel_token", "language",
+SETTINGS = ("public_url", "gateway_type", "gateway_url", "gateway_token", "gateway_session", "language",
             "contacts", "certificates", "limits", "whapi_token", "timezone")
 GATEWAY_TYPES = ("whapi", "waha")  # one adapter each, in adapters/gateways.py
 SERVICE_URL = re.compile(r"https?://[A-Za-z0-9]([A-Za-z0-9.-]{0,250}[A-Za-z0-9])?(:[0-9]{1,5})?")
@@ -71,11 +71,10 @@ class AppConfig:
     names: dict[str, str] = field(default_factory=dict)
     requests_per_hour: int = 20
     confirmation_minutes: int = 5
-    # The fixed HTTPS address the tunnel publishes, and the tokens of the two services.
+    # The fixed HTTPS address the tunnel publishes, and the token of the gateway.
     # The loader accepts a file without them; the bot refuses to start without them.
     public_url: str | None = None
     gateway_token: str | None = field(default=None, repr=False)
-    tunnel_token: str | None = field(default=None, repr=False)
     # Contacts with an hourly limit of their own, for people who send documents in bulk.
     request_limits: dict[str, int] = field(default_factory=dict)
     # How many days the record of signatures is kept.
@@ -104,13 +103,16 @@ def load_config(path: Path) -> AppConfig:
             config = yaml.safe_load(stream)
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError("Could not read the configuration file.") from exc
+    if isinstance(config, dict) and "tunnel_token" in config:
+        raise ValueError("tunnel_token now has a file of its own: put the token alone in config/tunnel-token "
+                         "and remove the tunnel_token line.")
     if not isinstance(config, dict) or set(config) - set(SETTINGS):
         raise ValueError("The configuration may contain only " + ", ".join(SETTINGS[:-2]) + " and " + SETTINGS[-2] + ".")
     default_language = resolve_language(str(config.get("language", DEFAULT_LANGUAGE)))
     if default_language is None:
         raise ValueError("language must be one of: " + ", ".join(LANGUAGES) + ".")
     tokens = {}
-    for key in ("gateway_token", "whapi_token", "tunnel_token"):
+    for key in ("gateway_token", "whapi_token"):
         value = config.get(key)
         if value is not None and (not isinstance(value, str) or not value or len(value) > 2000 or any(c.isspace() for c in value)):
             raise ValueError(f"{key} must be the token as text, in quotes and without spaces.")
@@ -163,7 +165,7 @@ def load_config(path: Path) -> AppConfig:
             ZoneInfo(timezone)
         except (TypeError, ValueError, OSError, ZoneInfoNotFoundError):
             raise ValueError("timezone must be the name of a time zone, such as Asia/Tokyo.") from None
-    return AppConfig(signers, languages, contact_names, per_hour, minutes, public_url, gateway_token, tokens["tunnel_token"],
+    return AppConfig(signers, languages, contact_names, per_hour, minutes, public_url, gateway_token,
                      request_limits, gateway_url=gateway_url, gateway_type=gateway_type, gateway_session=gateway_session,
                      log_days=log_days, timezone=timezone)
 
