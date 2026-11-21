@@ -68,6 +68,10 @@ class TokenPinRejected(SigningError):
     """The token refused the PIN. Trying again could lock the device."""
 
 
+class BreaksSignature(SigningError):
+    """The new signature would invalidate one already in the document, as a certification that allows no new fields does."""
+
+
 class TokenUnavailable(SigningError):
     """The token is not connected or could not be reached; no login was attempted."""
 
@@ -205,6 +209,31 @@ class SigningRequest:
     token: TokenSettings | None = None
 
 
+def _hybrid(document: bytes) -> bool:
+    """Whether the file has the hybrid cross-reference that Word writes, which pyHanko refuses unless allowed."""
+    return PdfFileReader(BytesIO(document), strict=False).xrefs.hybrid_xrefs_present
+
+
+def _pdf(document: bytes) -> PdfFileReader:
+    """Open a PDF for its signatures, allowing a hybrid cross-reference only in a file that has one."""
+    return PdfFileReader(BytesIO(document), strict=not _hybrid(document))
+
+
+def _sound(document: bytes) -> set[str]:
+    """The signatures of this file that validate and whose later changes they allow, by field name."""
+    sound = set()
+    for signature in _pdf(document).embedded_signatures:
+        try:
+            context = ValidationContext(trust_roots=[signature.signer_cert], allow_fetching=False)
+            status = validate_pdf_signature(signature, signer_validation_context=context)
+            changed = status.modification_level is not None and status.modification_level.name == "OTHER"
+            if status.intact and status.valid and not changed:
+                sound.add(signature.field_name)
+        except Exception:
+            continue
+    return sound
+
+
 def sign_pdf_sequence(document: bytes, requests: tuple[SigningRequest, ...]) -> bytes:
     """Apply all requested signatures in memory and verify them in the final PDF."""
     if not requests:
@@ -212,7 +241,7 @@ def sign_pdf_sequence(document: bytes, requests: tuple[SigningRequest, ...]) -> 
     if overlapping([request.position for request in requests]):
         raise SigningError("Signature areas overlap.")
     try:
-        known = {signature.field_name for signature in PdfFileReader(BytesIO(document)).embedded_signatures}
+        known = {signature.field_name for signature in _pdf(document).embedded_signatures}
         added = set()
         result = document
         for index, request in enumerate(requests):
@@ -223,14 +252,14 @@ def sign_pdf_sequence(document: bytes, requests: tuple[SigningRequest, ...]) -> 
                 # The caller tells people whose signature could not be made.
                 exc.request_index = index
                 raise
-            signatures = PdfFileReader(BytesIO(result)).embedded_signatures
+            signatures = _pdf(result).embedded_signatures
             names = {signature.field_name for signature in signatures}
             new = names - known
             if len(new) != 1 or not known.issubset(names):
                 raise SigningError("Could not identify the new signature.")
             added.update(new)
             known = names
-        final = PdfFileReader(BytesIO(result)).embedded_signatures
+        final = _pdf(result).embedded_signatures
         selected = [signature for signature in final if signature.field_name in added]
         if len(selected) != len(requests):
             raise SigningError("One or more signatures are missing.")
@@ -293,7 +322,8 @@ def sign_pdf(document: bytes, certificate: Path | None, password: bytes, positio
                             matches.append((page_number, tuple(float(value) for value in widget.get("/Rect", []))))
                 if matches != [(position.page, tuple(position.box))]:
                     raise SigningError("Signature field is missing, ambiguous or incompatible.")
-            writer = IncrementalPdfFileWriter(BytesIO(document))
+            before = _sound(document)
+            writer = IncrementalPdfFileWriter(BytesIO(document), strict=not _hybrid(document))
             if chain_context is not None:
                 metadata = signers.PdfSignatureMetadata(field_name=field_name, subfilter=fields.SigSeedSubFilter.PADES,
                                                         embed_validation_info=True, validation_context=chain_context)
@@ -310,12 +340,15 @@ def sign_pdf(document: bytes, certificate: Path | None, password: bytes, positio
                 ),
             ).sign_pdf(writer, output=output, existing_fields_only=bool(position.field_name))
             result = output.getvalue()
-            signed_reader = PdfFileReader(BytesIO(result))
+            signed_reader = _pdf(result)
             signature = next(sig for sig in signed_reader.embedded_signatures if sig.field_name == field_name)
             context = ValidationContext(trust_roots=[signer.signing_cert], allow_fetching=False)
             status = validate_pdf_signature(signature, signer_validation_context=context)
             if not status.intact or not status.valid:
                 raise SigningError("Cryptographic signature verification failed.")
+            # Another person's signature must stay valid: a certification may forbid adding a signature field.
+            if not before <= _sound(result):
+                raise BreaksSignature("Signing would invalidate a signature already in the document.")
             if timestamper is not None:
                 stamp = status.timestamp_validity
                 if stamp is None or not stamp.intact or not stamp.valid:

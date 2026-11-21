@@ -31,7 +31,7 @@ class SignatureReport:
 def verify_signatures(document: bytes) -> list[SignatureReport]:
     """Validate all signatures; raise DocumentError for an unreadable PDF."""
     validate_pdf(document)
-    signatures = PdfFileReader(BytesIO(document)).embedded_signatures
+    signatures = PdfFileReader(BytesIO(document), strict=not PdfFileReader(BytesIO(document), strict=False).xrefs.hybrid_xrefs_present).embedded_signatures
     if len(signatures) > MAX_SIGNATURES:
         raise ValueError("Too many signatures to verify.")
     reports = []

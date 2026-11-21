@@ -22,7 +22,7 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sealwharf.adapters.inbox import Inbox
 from sealwharf.application.signers import UnlockedSigner, unlock_signers
 from sealwharf.application.worker import process_one
-from sealwharf.documents.signing import SignaturePosition, SigningError, SigningRequest, sign_pdf, sign_pdf_sequence
+from sealwharf.documents.signing import BreaksSignature, SignaturePosition, SigningError, SigningRequest, sign_pdf, sign_pdf_sequence
 from sealwharf.signer_config import SignerConfig
 
 
@@ -198,6 +198,22 @@ def test_rejects_certificate_replaced_after_unlock(document, certificate):
 def test_rejects_invalid_document(certificate):
     with pytest.raises(SigningError):
         sign_pdf(b"not a pdf", certificate, b"test-password", SignaturePosition(0, (20, 20, 200, 80)))
+
+
+def test_never_invalidates_a_certification_that_allows_no_new_signature_fields(document, certificate):
+    from pyhanko.sign import fields, signers
+    certifier = SimpleSigner.load_pkcs12(str(certificate), passphrase=b"test-password")
+    certified = BytesIO()
+    signers.PdfSigner(signers.PdfSignatureMetadata(field_name="Certification", certify=True,
+                                                   docmdp_permissions=fields.MDPPerm.FILL_FORMS),
+                      signer=certifier, new_field_spec=SigFieldSpec("Certification", on_page=0, box=(220, 20, 380, 80))
+                      ).sign_pdf(IncrementalPdfFileWriter(BytesIO(document)), output=certified)
+    with pytest.raises(BreaksSignature):
+        sign_pdf(certified.getvalue(), certificate, b"test-password", SignaturePosition(0, (20, 20, 200, 80)))
+    # An ordinary signature already in the document stays valid, so another one is added.
+    approved = sign_pdf(document, certificate, b"test-password", SignaturePosition(0, (220, 20, 380, 80)))
+    assert len(PdfFileReader(BytesIO(sign_pdf(approved, certificate, b"test-password",
+                                                SignaturePosition(0, (20, 20, 200, 80))))).embedded_signatures) == 2
 
 
 def test_signs_existing_field_without_creating_another(document, certificate):

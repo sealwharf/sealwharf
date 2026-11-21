@@ -32,6 +32,7 @@ from ..documents.names import contains_name, matches_name, only_in_running_text
 from ..documents.normalize import normalize_rotation
 from ..documents.position import find_signature_position, has_signature_widgets
 from ..documents.signing import (
+    BreaksSignature,
     CertificateRejected,
     SignaturePosition,
     SigningError,
@@ -266,6 +267,7 @@ class SignerFailed(Exception):
         super().__init__("A signature could not be made.")
         self.signer = signer
         self.problem = ("certificate" if isinstance(cause, CertificateRejected)
+                        else "certified" if isinstance(cause, BreaksSignature)
                         else "token" if isinstance(cause, TokenUnavailable | TokenPinRejected) else "signature")
 
     @property
