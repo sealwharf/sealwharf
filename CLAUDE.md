@@ -32,7 +32,9 @@ command a reader needs.
 - `src/sealwharf/adapters/`: the WhatsApp gateways (`gateway.py` is what the bot
   needs from any of them, `gateways.py` lists the adapters, `whapi.py` and
   `waha.py` are one adapter each), inbox queue, audit record, worker lock and
-  the local AI model.
+  the local AI model (`local_ai.py`, `model_runtime.py`). The model service
+  (`ollama`, with the `model` download step in `compose.yaml`) is part of the
+  bot: it starts by default and the bot does not start without it.
 - `src/sealwharf/session.py`, `check.py`, `token_tools.py`, `healthcheck.py`,
   `purge.py`, `logs.py`, `__main__.py`: container entry points (`run`,
   `check`, `token-driver`, `token-check`, `token-retry`, `healthcheck`,

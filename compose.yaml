@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     init: true
     environment:
-      SEALWHARF_OLLAMA_URL: ${SEALWHARF_OLLAMA_URL:-http://127.0.0.1:11434}
+      SEALWHARF_OLLAMA_URL: ${SEALWHARF_OLLAMA_URL:-http://ollama:11434}
       SEALWHARF_ALLOW_SETTINGS_DEFAULTS: ${SEALWHARF_ALLOW_SETTINGS_DEFAULTS:-false}
       LD_LIBRARY_PATH: /data/pkcs11
     volumes:
@@ -21,6 +21,9 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    depends_on:
+      model:
+        condition: service_completed_successfully
 
   # Optional smart-card reader for USB tokens: docker compose --profile token up -d
   reader:
@@ -36,13 +39,29 @@ services:
       - /dev/bus/usb:/dev/bus/usb
       - pcsc:/run/pcscd
 
-  # Optional local vision model: docker compose --profile ai up -d
+  # The local AI model that reads the documents to find where each person signs.
+  # It runs on this computer, and documents never leave it.
   ollama:
-    profiles: [ai]
     image: ollama/ollama:latest
     restart: unless-stopped
     volumes:
       - models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      retries: 30
+
+  # Downloads the model on the first start (about 3 GB) and finds it already there on the next ones.
+  # The name must match MODEL in src/sealwharf/adapters/local_ai.py.
+  model:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "ollama show qwen3-vl:4b > /dev/null 2>&1 || ollama pull qwen3-vl:4b"]
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
 
 volumes:
   data:

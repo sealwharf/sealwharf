@@ -636,7 +636,11 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
                    if (position := _locate_signature(document, signer, contextual_review, general_suggest)) is not None]
         if not located:
             inbox.set_state(message_id, "needs_review")
-            _note(inbox, sender, "no_location", filename, names=", ".join(s.config.name for s in (referenced or authorized)))
+            # Nobody named is told apart from somebody named without a place, so no certificate seems to be meant.
+            if referenced:
+                _note(inbox, sender, "no_location", filename, names=", ".join(signer.config.name for signer in referenced))
+            else:
+                _note(inbox, sender, "no_signer", filename)
             return
         # Somebody named only inside a sentence, with no place to sign, is the subject of the document, not a signer.
         unplaced = [signer for signer in referenced

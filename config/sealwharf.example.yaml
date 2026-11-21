@@ -42,7 +42,7 @@ certificates:
     # aliases: ["Johnny Doe"]       # other spellings found in documents, using names from the certificate
     # logo: logos/company.png       # PNG or JPEG under config/logos
     # logo_scale: 0.5               # 0.1 to 1.0
-    # visual_review: ollama         # needs the optional local model service
+    # visual_review: ollama         # the AI model also confirms places found by drawn lines (slower)
     # timestamp_url: "https://timestamp.example/tsa"
     # trust_roots: ["trust/root-ca.crt"]
 

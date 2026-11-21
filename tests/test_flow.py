@@ -515,6 +515,14 @@ def test_partial_result_is_delivered_when_one_owner_does_not_approve(world):
     assert "NOT signed by: Carla Example" in world.chat.to(OWNER_A)[-1]
 
 
+def test_a_document_that_names_none_of_the_signers_says_so_without_listing_the_certificates(world):
+    message = world.send(OWNER_A, make_pdf("Somebody Else"))
+    assert world.state(message) == "needs_review" and not world.chat.files
+    told = world.chat.to(OWNER_A)[-1]
+    assert told.startswith("I did not find in this document the full name of anyone whose certificate you may use")
+    assert "Alice" not in told and "Bruno" not in told and "Carla" not in told
+
+
 def test_a_signed_document_can_receive_another_signature_later(world):
     world.send(OWNER_A, make_pdf("Alice Example", "Carla Example"))
     world.send(OWNER_A, text="1")
@@ -563,7 +571,7 @@ def test_documents_sent_together_by_their_owner_get_one_note_and_one_summary(wor
     assert [name for _, _, name in world.chat.files] == ["a.pdf", "b.pdf"]
     assert [text for _, text in world.chat.notes] == ["Got it! Working on it..."]
     assert world.chat.to(OWNER_A) == ["Here is what happened with your documents:\n- Signed: a.pdf, b.pdf\n"
-                                      "- NOT signed, no clear place to sign: c.pdf"]
+                                      "- NOT signed, no signer's name found: c.pdf"]
 
 
 def test_documents_sent_together_are_asked_and_approved_as_one(world):

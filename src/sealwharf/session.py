@@ -117,9 +117,9 @@ def main() -> None:
         worker_lock.acquire()
         inbox = Inbox(db_path)
         inbox.recover_interrupted(worker_lock)
-        if any(signer.visual_review == "ollama" for signer in config.signers):
-            stage = "reaching the local visual model"
-            model.ensure()
+        # Reading the document is how places that no rule finds are found, so the bot does not start without the model.
+        stage = "reaching the local AI model"
+        model.ensure()
         stage = "starting the webhook"
         server = _start([sys.executable, "-m", "uvicorn", "sealwharf.app:from_environment", "--factory",
                          "--host", "0.0.0.0", "--port", "8000", "--no-access-log"])

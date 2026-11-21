@@ -8,7 +8,7 @@
 
 Send a PDF or Word document and get it back digitally signed. Sealwharf runs on your own computer, in Docker, so your certificates and documents never leave it.
 
-- It finds the right place to sign by looking for the signer's name next to a signature line.
+- It reads the document to find where each person signs: a name under a line is enough, and a local AI model interprets the rest, such as a form with the name in one field and "Signature:" further down.
 - It can sign with certificate files (`.p12`, `.pfx`) and with USB tokens.
 - When someone asks to sign with another person's certificate, that person approves first, with a single reply.
 - It handles many documents at once and answers in English, Portuguese or Spanish.
@@ -20,6 +20,7 @@ Send a PDF or Word document and get it back digitally signed. Sealwharf runs on 
 - A WhatsApp *gateway* linked to the number that will be the bot: a channel on [Whapi.Cloud](https://whapi.cloud), or [WAHA](https://waha.devlike.pro) running on your computer. Step 3 explains both.
 - A domain managed by [Cloudflare](https://dash.cloudflare.com), to give the bot a fixed address.
 - Your certificate: a `.p12` or `.pfx` file with its password, or a USB token with its PIN.
+- About 8 GB of free disk space and 8 GB of memory, for the AI model that reads the documents. It runs on your computer; no document is sent to an AI service.
 
 ## Set it up in five steps
 
@@ -82,7 +83,7 @@ Check the file. This opens every certificate, tests the WhatsApp token, and tell
 docker compose run --rm sealwharf check
 ```
 
-The first run takes a few minutes, while Docker builds the program. When the check ends with `Ready to start.`, start the bot:
+The first run takes a while: Docker builds the program and downloads the AI model, about 3 GB, only once. When the check ends with `Ready to start.`, start the bot:
 
 ```bash
 docker compose up -d
@@ -99,12 +100,14 @@ A minute later the bot is ready. To confirm, send it the words `wake up bot` fro
 
 Send a PDF or Word document to the bot. It answers that it received the file and, a few seconds later, sends back the signed PDF.
 
-For the bot to find where to sign, **the document needs the signer's full name next to an empty signature line**, like this:
+For the bot to find where to sign, **the document needs each signer's full name, as in the certificate, near an empty place to sign**. The simplest case is a name under a line:
 
 ```
         ______________________________
                   John Doe
 ```
+
+When no line is that clear, the AI model reads the page the way a person would. A form with `Name: John Doe` and, further down, an empty `Signature:` is signed in that empty space. Whatever the model suggests is checked before signing: the place must be empty, of a sensible size and next to the right name, or nothing is signed. A name with a middle name left out (`John Doe` for `John Michael Doe`) is not taken as the holder; register that spelling with `aliases` (see *Advanced settings*).
 
 Only the people who sign need that. A name that appears only inside a sentence, such as the person a declaration is about, is not taken as a signer.
 
@@ -430,7 +433,9 @@ docker compose run --rm sealwharf check
 | --- | --- |
 | The bot does not answer `wake up bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the gateway is linked to WhatsApp: on Whapi.Cloud the channel must be connected, on WAHA the session must be `WORKING`. |
 | `docker compose ps` shows the bot restarting | Run `docker compose logs sealwharf` and the check above. The usual causes are a mistake in the configuration or the Cloudflare route from step 5 not created yet. |
-| "I could not find a clear place to sign" | The document needs the signer's full name, as in the certificate, next to one empty signature line. The name must appear only once as a signature label. |
+| "I could not find a clear place to sign" | The document needs the signer's full name, as in the certificate, near one empty place to sign. The name must appear only once as a signature label. |
+| "I did not find in this document the full name of anyone" | The names in the document differ from the certificates, for example with a middle name left out. Add that spelling to the certificate with `aliases`. |
+| `docker compose ps` shows the bot waiting, or "reaching the local AI model" in its logs | The AI model is still downloading or did not start. Run `docker compose up model` to see the download, and `docker compose ps ollama` to check the model service. |
 | "Could not open certificate" | The password is wrong, or the certificate file is not in `config/certificates/`. |
 | "The configured name does not match certificate" | Write `name` with the same words as the holder's name in the certificate. Capitals and accents do not matter, but every word must be there, in the same order. |
 | "could not open … token is connected" | The token is unplugged or not attached. On Windows, repeat `usbipd attach`. |
@@ -521,7 +526,7 @@ These are optional, per certificate. `config/sealwharf.example.yaml` shows the s
 | `logo`, `logo_scale` | A PNG or JPEG under `config/logos/` to show in the signature stamp, and its size from `0.1` to `1.0`. |
 | `timestamp_url` | Adds a timestamp from an RFC 3161 authority. Needs Internet access while signing. |
 | `trust_roots` | Root certificates (PEM or DER files under `config/`). The signer's chain and its revocation status must validate against them, and the proof is embedded in the PDF. For ICP-Brasil, download the roots from the official ITI repository. |
-| `visual_review: ollama` | Lets a local AI model find signature places in forms and scanned pages. Start it with `docker compose --profile ai up -d`, download the model once with `docker compose --profile ai exec ollama ollama pull qwen3-vl:4b`, and set `SEALWHARF_OLLAMA_URL=http://ollama:11434` in a `.env` file. |
+| `visual_review: ollama` | Has the AI model also confirm the places found by drawn lines, not only the ones it finds by reading. Slower; useful for documents with many lines. |
 
 Notes on how signing works:
 

@@ -51,9 +51,9 @@ def project(tmp_path, monkeypatch):
     return write
 
 
-def run_check(channel=lambda config: None):
+def run_check(channel=lambda config: None, model=lambda: True):
     lines = []
-    return check(channel=channel, output=lines.append), "\n".join(lines)
+    return check(channel=channel, model=model, output=lines.append), "\n".join(lines)
 
 
 def test_check_confirms_a_working_configuration_without_printing_secrets(project):
@@ -61,7 +61,7 @@ def test_check_confirms_a_working_configuration_without_printing_secrets(project
     ready, report = run_check(lambda config: seen.append((config.gateway_type, config.gateway_token)))
     assert ready and seen == [("whapi", "gateway-secret")]
     assert "certificate john: opens and matches its name" in report and "WhatsApp gateway is connected" in report
-    assert report.endswith("Ready to start.")
+    assert "AI model qwen3-vl:4b is ready" in report and report.endswith("Ready to start.")
     for secret in ("correct horse", "gateway-secret", "tunnel-secret"):
         assert secret not in report
 
@@ -88,6 +88,14 @@ def test_check_reports_name_mismatch_channel_failure_and_unreadable_file(project
     project(password='broken" quote')
     ready, report = run_check()
     assert not ready and report.startswith("PROBLEM  configuration:")
+
+
+def test_check_requires_the_ai_model(project):
+    ready, report = run_check(model=lambda: None)
+    assert not ready and "the AI model service cannot be reached; start it with: docker compose up -d ollama" in report
+    ready, report = run_check(model=lambda: False)
+    assert not ready and "the AI model qwen3-vl:4b is not installed; download it with: docker compose up model" in report
+    assert report.endswith("1 problem(s) to fix in config/sealwharf.yaml.")
 
 
 def test_channel_check_accepts_only_a_connected_channel():
