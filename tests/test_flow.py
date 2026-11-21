@@ -30,6 +30,7 @@ from sealwharf.documents.names import only_in_running_text
 from sealwharf.documents.signing import CertificateRejected, TokenUnavailable
 from sealwharf.documents.verification import describe, verify_signatures
 from sealwharf.messages import CATALOGS, wake_reply
+from sealwharf.messages import text as message_text
 from sealwharf.signer_config import SignerConfig, load_config
 
 OWNER_A, OWNER_B, OWNER_C = "5511900000001", "5511900000002", "5511900000003"
@@ -72,6 +73,10 @@ def make_pdf(*names, password=None, text=None):
     output = BytesIO()
     writer.write(output)
     return output.getvalue()
+
+
+# The reminder that follows every message that comes with a signed document.
+REVIEW = {code: "\n" + text(code, "review_reminder") for code in ("en", "pt-br", "es")}
 
 
 class Chat:
@@ -182,7 +187,7 @@ def test_owner_signs_own_document_directly_and_it_is_audited(world):
     document = make_pdf("Alice Example")
     message = world.send(OWNER_A, document)
     assert world.state(message) == "sent" and world.chat.texts == []
-    assert [text for _, text in world.chat.notes] == ["Got it! Working on it...", "All set! Signed by: Alice Example."]
+    assert [text for _, text in world.chat.notes] == ["Got it! Working on it...", "All set! Signed by: Alice Example." + REVIEW["en"]]
     recipient, signed, _ = world.chat.files[0]
     assert recipient == OWNER_A and signer_names(signed) == ["Alice Example"]
     entry = world.audit.entries()[0]
@@ -258,7 +263,7 @@ def test_the_signer_that_failed_among_several_is_named_and_nothing_is_signed(wor
     while process_one(world.inbox, world.chat, world.signers, runtime=portuguese):
         pass
     assert world.chat.to(OWNER_A)[-1] == ("Veja o que aconteceu com os seus documentos:\n- Assinado: a.pdf\n"
-                                          "- NÃO assinado, a assinatura de Bruno Example não pôde ser feita: b.pdf")
+                                          "- NÃO assinado, a assinatura de Bruno Example não pôde ser feita: b.pdf" + REVIEW["pt-br"])
 
 
 def test_a_person_the_document_only_talks_about_is_not_taken_as_a_signer(world):
@@ -337,7 +342,7 @@ def test_requester_agrees_then_the_owner_approves_with_a_single_digit(world):
     assert world.chat.to(OWNER_A)[-1] == "Approved! The document was signed."
     recipient, signed, filename = world.chat.files[0]
     assert (recipient, filename) == (PREPARER, "contract.pdf") and signer_names(signed) == ["Alice Example"]
-    assert world.chat.notes[-1] == (PREPARER, "All set! Signed by: Alice Example.") and world.state(message) == "sent"
+    assert world.chat.notes[-1] == (PREPARER, "All set! Signed by: Alice Example." + REVIEW["en"]) and world.state(message) == "sent"
     entry = world.audit.entries()[0]
     assert (entry["approval"], entry["requester"], entry["confirmed_by"]) == ("confirmed", PREPARER, OWNER_A)
     assert not world.runtime.pending_file(entry["request_id"]).exists()
@@ -468,7 +473,7 @@ def test_requester_chooses_who_signs_when_several_signers_are_found(world):
     assert "not one of the options" in world.chat.to(OWNER_A)[-1] and not world.chat.files
     world.send(OWNER_A, text="2")
     assert world.state(message) == "sent" and signer_names(world.chat.files[0][1]) == ["Bruno Example"]
-    assert world.chat.files[0][2] == "report.pdf" and world.chat.notes[-1][1] == "All set! Signed by: Bruno Example."
+    assert world.chat.files[0][2] == "report.pdf" and world.chat.notes[-1][1] == "All set! Signed by: Bruno Example." + REVIEW["en"]
     assert [entry["certificate_id"] for entry in world.audit.entries()] == ["bruno"]
     quiet = len(world.chat.to(OWNER_A))
     world.send(OWNER_A, text="2")
@@ -571,7 +576,7 @@ def test_documents_sent_together_by_their_owner_get_one_note_and_one_summary(wor
     assert [name for _, _, name in world.chat.files] == ["a.pdf", "b.pdf"]
     assert [text for _, text in world.chat.notes] == ["Got it! Working on it..."]
     assert world.chat.to(OWNER_A) == ["Here is what happened with your documents:\n- Signed: a.pdf, b.pdf\n"
-                                      "- NOT signed, no signer's name found: c.pdf"]
+                                      "- NOT signed, no signer's name found: c.pdf" + REVIEW["en"]]
 
 
 def test_documents_sent_together_are_asked_and_approved_as_one(world):
@@ -597,7 +602,7 @@ def test_documents_sent_together_are_asked_and_approved_as_one(world):
     entries = world.audit.entries()
     assert [entry["approval"] for entry in entries] == ["confirmed"] * 3 and len({entry["document_sha256"] for entry in entries}) == 3
     assert world.chat.to(OWNER_A)[-1] == "Here is what happened with your documents:\n- Approved and signed: a.pdf, b.pdf, c.pdf"
-    assert world.chat.to(PREPARER)[-1] == "Here is what happened with your documents:\n- Signed: a.pdf, b.pdf, c.pdf"
+    assert world.chat.to(PREPARER)[-1] == "Here is what happened with your documents:\n- Signed: a.pdf, b.pdf, c.pdf" + REVIEW["en"]
 
 
 def test_refusing_a_batch_refuses_every_document_in_it(world):
@@ -917,7 +922,7 @@ def test_each_person_is_answered_in_their_own_language(world):
     assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
     assert world.chat.to(OWNER_C) == []
     assert world.chat.to(OWNER_A)[-1] == "Aprovado! O documento foi assinado."
-    assert world.chat.notes[-1] == (PREPARER, "Tudo certo! Assinado por: Alice Example.")
+    assert world.chat.notes[-1] == (PREPARER, "Tudo certo! Assinado por: Alice Example." + REVIEW["pt-br"])
 
 
 def test_a_spanish_speaker_is_asked_and_answered_in_spanish(world):
@@ -939,7 +944,7 @@ def test_a_spanish_speaker_is_asked_and_answered_in_spanish(world):
     assert world.chat.to(PREPARER)[2].startswith("¡Listo! Envié el documento a Ana para su aprobación.")
     step("owner1", parse_command("aprobar"))
     assert world.chat.to(OWNER_A)[-1] == "¡Aprobado! El documento fue firmado."
-    assert world.chat.notes[-1] == (PREPARER, "¡Listo! Firmado por: Alice Example.")
+    assert world.chat.notes[-1] == (PREPARER, "¡Listo! Firmado por: Alice Example." + REVIEW["es"])
     assert signer_names(world.chat.files[0][1]) == ["Alice Example"]
 
 

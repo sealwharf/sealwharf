@@ -111,6 +111,10 @@ class Runtime:
 
 # Telling people what happened.
 
+# Outcomes that come with a signed document.
+DELIVERED = frozenset({"signed_by", "partial", "partial_problem"})
+
+
 def _note(inbox: Inbox, recipient: str, key: str, filename: str | None = None, **values: object) -> None:
     """Keep what happened to a document, to be told together with the person's other documents."""
     inbox.add_note(recipient, key, filename, values)
@@ -141,6 +145,9 @@ def tell_outcomes(inbox: Inbox, client, runtime: Runtime) -> None:
             for key, filename, values in notes:
                 groups.setdefault(_told(language, "sum_" + key, values), []).append(_file(runtime, recipient, filename))
             message = "\n".join([text(language, "summary")] + [f"- {label}: {', '.join(files)}" for label, files in groups.items()])
+        # Whoever receives a signed document is asked to look at it, the place of each signature included.
+        if any(key in DELIVERED for key, _, _ in notes):
+            message += "\n" + text(language, "review_reminder")
         try:
             client.send_text(recipient, message)
         except Exception:

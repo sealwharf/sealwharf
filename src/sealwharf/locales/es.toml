@@ -48,6 +48,7 @@ wake = [
 received = "¡Recibido! Lo estoy procesando..."
 fonts_replaced = "Tu documento de Word fue convertido a PDF. Sustituí las fuentes que no tengo: {fonts}. Para un resultado perfecto, envía el documento en PDF."
 signed_by = "¡Listo! Firmado por: {signed}."
+review_reminder = "Revisa el documento firmado, incluido dónde se colocó cada firma, antes de reenviarlo."
 no_location = "No encontré un lugar claro para la firma de: {names}. No se firmó nada. Cada firmante necesita su nombre completo cerca de un único lugar vacío para firmar."
 no_signer = "No encontré en este documento el nombre completo de nadie cuyo certificado puedas usar, así que no se firmó nada. El nombre debe estar escrito como en el certificado: un segundo nombre puede abreviarse con su inicial, pero no omitirse. Quien administra el bot puede registrar otra forma de escribir el nombre."
 rate_limited = "Has enviado muchos documentos en la última hora. Inténtalo de nuevo un poco más tarde."

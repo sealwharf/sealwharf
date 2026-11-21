@@ -49,6 +49,7 @@ wake = [
 received = "Got it! Working on it..."
 fonts_replaced = "Your Word document was converted to PDF. I replaced the fonts I do not have: {fonts}. For a perfect result, send the document as PDF."
 signed_by = "All set! Signed by: {signed}."
+review_reminder = "Please review the signed document, including where each signature was placed, before sending it on."
 no_location = "I could not find a clear place to sign for: {names}. Nothing was signed. Each signer needs their full name near one empty place to sign."
 no_signer = "I did not find in this document the full name of anyone whose certificate you may use, so nothing was signed. The name must be written as in the certificate: a middle name may be shortened to its initial, but not left out. Whoever runs the bot can register another way the name is written."
 rate_limited = "You have sent many documents in the last hour. Please try again a little later."
