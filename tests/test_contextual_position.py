@@ -81,6 +81,19 @@ def test_does_not_assign_other_roles_or_wrong_names():
     assert suggest_contextual_position(form(rotation=90), "Jane Example") is None
 
 
+def test_a_label_naming_a_role_belongs_to_the_person_written_with_that_role():
+    role = {"name": b"Entity representative: Jane Example", "signature": b"Signature of the entity representative:"}
+    candidate = suggest_contextual_position(form(**role), "Jane Example")
+    assert candidate is not None and 400 < candidate.box[1] < 440 < candidate.box[3] < 460
+    # Another role, another name with that role, the role written apart from the name, or two people with it: not signed.
+    assert suggest_contextual_position(form(name=b"Witness: Jane Example", signature=role["signature"]), "Jane Example") is None
+    assert suggest_contextual_position(form(**role), "John Example") is None
+    assert suggest_contextual_position(form(name=b"Entity representative:", signature=role["signature"],
+                                            extra=b"BT /F1 12 Tf 65 620 Td (Jane Example) Tj ET "), "Jane Example") is None
+    assert suggest_contextual_position(form(**role, extra=b"BT /F1 12 Tf 65 620 Td (Entity representative: Jane Example) Tj ET "),
+                                       "Jane Example") is None
+
+
 def test_rejects_multiple_names_or_signatures_and_occupied_space():
     for extra in (b"BT /F1 12 Tf 65 620 Td (Name: John Example) Tj ET ",
                   b"BT /F1 12 Tf 65 420 Td (Signature:) Tj ET ",

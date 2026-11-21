@@ -11,6 +11,7 @@ from io import BytesIO
 import pypdfium2 as pdfium
 from pypdf import PdfReader
 
+from .names import matches_name
 from .visual_position import VisualCandidate, _annotations_clear, _matches_identity, _page_objects_clear, _tokens
 
 MAX_PAGE_CHARACTERS = 100_000
@@ -50,6 +51,19 @@ def _text_lines(page) -> list[_Line] | None:
 
 def _inside(inner, outer) -> bool:
     return outer[0] <= inner[0] < inner[2] <= outer[2] and outer[1] <= inner[1] < inner[3] <= outer[3]
+
+
+def _role_and_name(text: str, identity: tuple[str, ...]) -> tuple[str, ...]:
+    """The role written before the signer's name, as in "Entity representative: Jane Example"; empty otherwise."""
+    role, colon, name = text.rpartition(":")
+    if not colon or "\n" in text or not matches_name(_tokens(name), identity):
+        return ()
+    return _tokens(role)
+
+
+def _holds_role(written: tuple[str, ...], label: tuple[str, ...]) -> bool:
+    """Whether every word of the written role appears, in order and together, in the signature label."""
+    return bool(written) and any(label[i:i + len(written)] == written for i in range(len(label) - len(written) + 1))
 
 
 def suggest_contextual_position(document: bytes, signer_name: str) -> VisualCandidate | None:
@@ -96,12 +110,18 @@ def suggest_contextual_position(document: bytes, signer_name: str) -> VisualCand
                             continue
                         section_lines = [line for line in lines if _inside(line.box, section)]
                         signature_lines = [line for line in section_lines if _tokens(line.text)[:1] in {('assinatura',), ('signature',)}]
-                        name_lines = [line for line in section_lines if _tokens(line.text)[:1] in {('nome',), ('name',)}]
-                        matches = [line for line in name_lines if _matches_identity(line.text, identity)]
-                        if len(signature_lines) != 1 or len(name_lines) != 1 or len(matches) != 1:
+                        if len(signature_lines) != 1:
                             continue
                         label = signature_lines[0]
-                        if _tokens(label.text) not in {('assinatura',), ('signature',)} or matches[0].box[1] <= label.box[3]:
+                        role = _tokens(label.text)[1:]
+                        if role:
+                            # A label naming a role ("Signature of the entity representative") belongs to the
+                            # one person written with that same role ("Entity representative: Jane Example").
+                            matches = [line for line in section_lines if _holds_role(_role_and_name(line.text, identity), role)]
+                        else:
+                            name_lines = [line for line in section_lines if _tokens(line.text)[:1] in {('nome',), ('name',)}]
+                            matches = [line for line in name_lines if _matches_identity(line.text, identity)] if len(name_lines) == 1 else []
+                        if len(matches) != 1 or matches[0].box[1] <= label.box[3]:
                             continue
                         row_edges = [b for b in horizontal if abs(b[0] - left[0]) <= 5 and abs(b[2] - right[2]) <= 5]
                         above = [b for b in row_edges if b[1] > label.box[3]]
