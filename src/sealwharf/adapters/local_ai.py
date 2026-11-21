@@ -44,6 +44,11 @@ OLLAMA_ENDPOINT = ollama_base_url() + "/api/chat"
 MAX_RESPONSE_BYTES = 65536
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_PAGE_POINTS = 5000
+# On a processor without a suitable GPU the model reads about 500 image tokens every 40 seconds, so the
+# pictures are kept just large enough to read a name, and an answer may take a few minutes.
+PAGE_PIXELS = 1000.0
+REVIEW_PIXELS = 1200.0
+MODEL_SECONDS = 300
 SCHEMA = {
     "type": "object", "additionalProperties": False,
     "properties": {"signature_area": {"type": "boolean"}, "visible_name": {"type": "string"}},
@@ -63,7 +68,7 @@ def _ask_model(picture: bytes, prompt: str, schema: dict, transport=None):
                "messages": [{"role": "user", "content": prompt + " /no_think",
                              "images": [base64.b64encode(picture).decode("ascii")]},
                             {"role": "assistant", "content": "<think>\n\n</think>\n\n"}]}
-    with httpx.Client(timeout=httpx.Timeout(180, connect=5), follow_redirects=False,
+    with httpx.Client(timeout=httpx.Timeout(MODEL_SECONDS, connect=5), follow_redirects=False,
                       trust_env=False, transport=transport) as client:
         with client.stream("POST", OLLAMA_ENDPOINT, json=request) as response:
             response.raise_for_status()
@@ -136,7 +141,7 @@ def suggest_general_position(document: bytes, signer_name: str, *, transport=Non
                 try:
                     # Bound whole-page inference cost; the follow-up review uses
                     # a higher-resolution image to check the proposed area.
-                    scale = min(2.0, 1200.0 / max(media[2:]))
+                    scale = min(2.0, PAGE_PIXELS / max(media[2:]))
                     bitmap = page.render(scale=scale, draw_annots=True)
                     try:
                         picture = bitmap.to_pil().convert("RGB")
@@ -201,7 +206,7 @@ def _preview(document: bytes, candidate: VisualCandidate) -> bytes:
             and 0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
             and 30 <= x2 - x1 <= 300 and 15 <= y2 - y1 <= 80):
         raise ValueError("Invalid signature rectangle")
-    scale = min(2.0, 1800.0 / max(width, height))
+    scale = min(2.0, REVIEW_PIXELS / max(width, height))
     with pdfium.PdfDocument(document) as pdf:
         rendered_page = pdf[candidate.page]
         try:
@@ -294,7 +299,7 @@ def _review_candidate(document: bytes, signer_name: str, candidate: VisualCandid
                    "messages": [{"role": "user", "content": prompt,
                                  "images": [base64.b64encode(picture).decode("ascii")]},
                                 {"role": "assistant", "content": "<think>\n\n</think>\n\n"}]}
-        with httpx.Client(timeout=httpx.Timeout(180, connect=5), follow_redirects=False,
+        with httpx.Client(timeout=httpx.Timeout(MODEL_SECONDS, connect=5), follow_redirects=False,
                           trust_env=False, transport=transport) as client:
             with client.stream("POST", OLLAMA_ENDPOINT, json=request) as response:
                 response.raise_for_status()
