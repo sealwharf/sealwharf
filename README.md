@@ -110,7 +110,11 @@ For the bot to find where to sign, **the document needs each signer's full name,
                   John Doe
 ```
 
-When no line is that clear, the AI model reads the page the way a person would. A form with `Name: John Doe` and, further down, an empty `Signature:` is signed in that empty space. Whatever the model suggests is checked before signing: the place must be empty, of a sensible size and next to the right name, or nothing is signed. A name with a middle name left out (`John Doe` for `John Michael Doe`) is not taken as the holder; register that spelling with `aliases` (see *Advanced settings*).
+When no line is that clear, the bot reads the document the way a person would. It lists every empty place where a signature fits (after a `Signature:` label, above a line, above underscores) with the text of its own table cell or block. A form with `Name: John Doe` and, further down, an empty `Signature:` is signed in that empty space; a label such as `Signature of the witness` goes to the person the document calls the witness. When that is still not enough, the local AI model reads those places and picks one, in a few seconds. The model only picks among places the bot already checked to be empty, and it is not followed when the document says otherwise.
+
+If there is still no clear place, the bot asks before doing anything: "Shall I sign at the end of the last page? 1 - Yes, 0 - Cancel". Every signed document comes back with a request to check it, including where each signature was placed.
+
+The name, though, must be clear: the full name as in the certificate must be written in the document. A name with a middle name left out (`John Doe` for `John Michael Doe`) is not taken as the holder; register that spelling with `aliases` (see *Advanced settings*).
 
 Only the people who sign need that. A name that appears only inside a sentence, such as the person a declaration is about, is not taken as a signer.
 
@@ -437,7 +441,7 @@ docker compose run --rm sealwharf check
 | The bot does not answer `wake up bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the gateway is linked to WhatsApp: on Whapi.Cloud the channel must be connected, on WAHA the session must be `WORKING`. |
 | `docker compose ps` shows the bot restarting | Run `docker compose logs sealwharf` and the check above. The usual causes are a mistake in the configuration or the Cloudflare route from step 5 not created yet, or pointing to another address than `http://sealwharf:8000`. Run `docker compose logs tunnel` to see the tunnel. |
 | "tunnel_token now has a file of its own" | Move the token from `config/sealwharf.yaml` into `config/tunnel-token`, alone, and delete the `tunnel_token` line. In the Cloudflare route, change the service to `http://sealwharf:8000`. |
-| "I could not find a clear place to sign" | The document needs the signer's full name, as in the certificate, near one empty place to sign. The name must appear only once as a signature label. |
+| "I could not find a clear place to sign" | Answer `1` to sign at the end of the last page, or `0` to cancel. If the bot does not offer that, the document does not write the signer's full name as in the certificate, or the last page has no room. |
 | "I did not find in this document the full name of anyone" | The names in the document differ from the certificates, for example with a middle name left out. Add that spelling to the certificate with `aliases`. |
 | `docker compose ps` shows the bot waiting, or "reaching the local AI model" in its logs | The AI model is still downloading or did not start. Run `docker compose up model` to see the download, and `docker compose ps ollama` to check the model service. |
 | "Could not open certificate" | The password is wrong, or the certificate file is not in `config/certificates/`. |

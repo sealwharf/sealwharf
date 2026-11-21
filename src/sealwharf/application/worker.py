@@ -26,6 +26,7 @@ from ..adapters.audit import AuditLog, operational_logger
 from ..adapters.inbox import Inbox, Job, PendingSignature, SigningRequestRecord
 from ..adapters.local_ai import suggest_local_ai_position
 from ..authorization import format_number
+from ..documents.candidates import free_places_at_end, place_by_name, signature_places
 from ..documents.contextual_position import suggest_contextual_position
 from ..documents.docx import convert_docx_to_pdf, substituted_fonts
 from ..documents.names import contains_name, matches_name, only_in_running_text
@@ -214,17 +215,21 @@ def _only_mentioned(document: bytes, signer: UnlockedSigner) -> bool:
     return only_in_running_text("\n".join(page.extract_text() or "" for page in reader.pages), identities)
 
 
-def _locate_signature(document: bytes, signer: UnlockedSigner, contextual_review, general_suggest):
+def _locate_signature(document: bytes, signer: UnlockedSigner, contextual_review, general_suggest, choose_place=None):
     """Find the one place for this signer, trying each way the name is written."""
     found = {}
     for name in signer.config.names:
-        position = _locate_named(document, name, signer.config.visual_review, contextual_review, general_suggest)
+        position = _locate_named(document, name, signer.config.visual_review, contextual_review, general_suggest, choose_place)
         if position is not None:
             found[(position.page, tuple(position.box))] = position
     return next(iter(found.values())) if len(found) == 1 else None
 
 
-def _locate_named(document: bytes, name: str, visual_review: str, contextual_review, general_suggest):
+def _named(document: bytes, name: str) -> bool:
+    return any(contains_name(source, words(name)) for source in _sources(document))
+
+
+def _locate_named(document: bytes, name: str, visual_review: str, contextual_review, general_suggest, choose_place=None):
     position = find_signature_position(BytesIO(document), name)
     if position is not None or has_signature_widgets(document):
         return position
@@ -237,6 +242,22 @@ def _locate_named(document: bytes, name: str, visual_review: str, contextual_rev
         raise ValueError("Unsupported visual review mode")
     if len(candidates) == 1:
         return SignaturePosition(candidates[0].page, candidates[0].box)
+    # Reading the document: the empty place whose own block names the person, or the one the local model picks.
+    try:
+        places = signature_places(document) if _named(document, name) else []
+    except Exception:
+        # A page this reading does not handle is left to the other ways below.
+        places = []
+    if places:
+        by_name = place_by_name(places, name)
+        if by_name is not None:
+            return SignaturePosition(by_name.page, by_name.box)
+        if choose_place is not None:
+            verdict, place = choose_place(document, name)
+            if verdict == "chosen":
+                return SignaturePosition(place.page, place.box)
+            if verdict == "none":
+                return None
     contextual = None
     if contextual_review is not None:
         contextual = suggest_contextual_position(document, name)
@@ -604,7 +625,8 @@ def _handle_command(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
     inbox.set_state(job.message_id, "done")
 
 
-def _handle_document(inbox: Inbox, client, signers, contextual_review, general_suggest, runtime: Runtime, job: Job) -> None:
+def _handle_document(inbox: Inbox, client, signers, contextual_review, general_suggest, runtime: Runtime, job: Job,
+                     choose_place=None) -> None:
     message_id, media_id, filename, sender = job[:4]
     authorized = tuple(signer for signer in signers if sender in signer.config.allowed_senders)
     if not authorized:
@@ -642,8 +664,17 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
         if _has_unresolved_name_variant(document, referenced, authorized):
             referenced = ()
         located = [(signer, position) for signer in referenced
-                   if (position := _locate_signature(document, signer, contextual_review, general_suggest)) is not None]
+                   if (position := _locate_signature(document, signer, contextual_review, general_suggest, choose_place)) is not None]
+        # Two people given the same place: neither is placed, so neither is signed there.
+        clashing = {signer.config.id for signer, position in located
+                    for other, place in located if other is not signer and overlapping([position, place])}
+        located = [(signer, position) for signer, position in located if signer.config.id not in clashing]
         if not located:
+            # Somebody named in the document, but with no clear place: offer to sign at the end of the last page.
+            at_end = _at_end(document, referenced)
+            if at_end:
+                _offer_choice(inbox, client, runtime, job, document, at_end, [], at_end=True)
+                return
             inbox.set_state(message_id, "needs_review")
             # Nobody named is told apart from somebody named without a place, so no certificate seems to be meant.
             if referenced:
@@ -654,14 +685,29 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
         # Somebody named only inside a sentence, with no place to sign, is the subject of the document, not a signer.
         unplaced = [signer for signer in referenced
                     if all(signer is not placed for placed, _ in located) and not _only_mentioned(document, signer)]
-        if overlapping([position for _, position in located]):
-            raise ValueError("Signature areas overlap.")
         if len(located) == 1 and not unplaced and not located[0][0].config.needs_confirmation(sender):
             _proceed(inbox, client, signers, runtime, job, document, located)
         else:
             _offer_choice(inbox, client, runtime, job, document, located, unplaced)
     except Exception as exc:
         _report_failure(inbox, message_id, sender, filename, exc)
+
+
+def _at_end(document: bytes, referenced) -> list:
+    """Places at the end of the last page for the signers whose names the document really writes, or none.
+
+    The identity rule stands: a signer is offered only when the full name, or a registered alias,
+    is written in the document, and not only inside a sentence about that person.
+    """
+    try:
+        named = [signer for signer in referenced
+                 if any(_named(document, name) for name in signer.config.names) and not _only_mentioned(document, signer)]
+        spare = free_places_at_end(document, len(named)) if named else []
+    except Exception:
+        return []
+    if not named or len(spare) != len(named):
+        return []
+    return [(signer, SignaturePosition(page, box, None)) for signer, (page, box) in zip(named, spare, strict=True)]
 
 
 def _report_failure(inbox: Inbox, message_id: str, sender: str, filename: str | None, exc: Exception) -> None:
@@ -703,7 +749,8 @@ def _proceed(inbox: Inbox, client, signers, runtime: Runtime, job: Job, document
     _note(inbox, job.sender, "signed_by", job.filename, signed=", ".join(signer.config.name for signer, _ in planned))
 
 
-def _offer_choice(inbox: Inbox, client, runtime: Runtime, job: Job, document: bytes, located, unplaced) -> None:
+def _offer_choice(inbox: Inbox, client, runtime: Runtime, job: Job, document: bytes, located, unplaced, *,
+                  at_end: bool = False) -> None:
     """Keep the document and put in line the question of who should sign, or whether to ask an owner.
 
     Nothing reaches a certificate owner until the requester has answered. The
@@ -712,7 +759,14 @@ def _offer_choice(inbox: Inbox, client, runtime: Runtime, job: Job, document: by
     request_id = _new_request()
     entries = [_entry(request_id, signer, position, "offered") for signer, position in located]
     language = runtime.language(job.sender)
-    if len(located) == 1 and not unplaced:
+    if at_end:
+        names = ", ".join(signer.config.name for signer, _ in located)
+        question = text(language, "at_end", names=names, minutes=runtime.confirmation_minutes)
+        if len(located) > 1:
+            options = "\n".join(f"{index} - {signer.config.name}" for index, (signer, _) in enumerate(located, start=1))
+            question = text(language, "at_end_many", names=names) + "\n" + text(
+                language, "choose", minutes=runtime.confirmation_minutes, all=len(located) + 1, options=options)
+    elif len(located) == 1 and not unplaced:
         question = text(language, "ask_owner", name=located[0][0].config.name, minutes=runtime.confirmation_minutes,
                         owner=runtime.called(located[0][0].config.owner))
     else:
@@ -766,13 +820,13 @@ def _choose_one(inbox: Inbox, client, signers, runtime: Runtime, sender: str, re
 
 
 def process_one(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], contextual_review=None, general_suggest=None,
-                runtime: Runtime | None = None) -> bool:
+                runtime: Runtime | None = None, choose_place=None) -> bool:
     """Handle one queued event; return False when the queue is empty."""
     runtime = runtime or Runtime(inbox.path.parent)
     expire_requests(inbox, client, signers, runtime)
     job = inbox.claim()
     if job is not None:
-        _handle(inbox, client, signers, contextual_review, general_suggest, runtime, job)
+        _handle(inbox, client, signers, contextual_review, general_suggest, runtime, job, choose_place)
     # Outcomes first, so the last thing a person reads is the question that waits for an answer.
     tell_outcomes(inbox, client, runtime)
     ask_questions(inbox, client, signers, runtime)
@@ -781,9 +835,10 @@ def process_one(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], conte
     return job is not None
 
 
-def _handle(inbox: Inbox, client, signers, contextual_review, general_suggest, runtime: Runtime, job: Job) -> None:
+def _handle(inbox: Inbox, client, signers, contextual_review, general_suggest, runtime: Runtime, job: Job,
+            choose_place=None) -> None:
     if job.kind == "document":
-        _handle_document(inbox, client, signers, contextual_review, general_suggest, runtime, job)
+        _handle_document(inbox, client, signers, contextual_review, general_suggest, runtime, job, choose_place)
         return
     try:
         if job.kind == "refused":

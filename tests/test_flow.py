@@ -211,9 +211,24 @@ def test_trusted_preparer_signs_without_asking(world):
     assert world.audit.entries()[0]["approval"] == "autotrust"
 
 
-def test_ambiguous_name_is_not_signed(world):
+def test_a_name_under_two_lines_is_signed_only_where_the_requester_agrees(world):
     message = world.send(OWNER_A, make_pdf("Alice Example", "Alice Example"))
-    assert world.state(message) == "needs_review" and not world.chat.files and world.audit.entries() == []
+    assert world.state(message) == "awaiting_choice" and not world.chat.files and world.audit.entries() == []
+    assert world.chat.to(OWNER_A)[-1].endswith("I could not find a clear place to sign for Alice Example. Shall I sign at the end "
+                                               "of the last page? Reply within 5 minute(s):\n1 - Yes, sign at the end of the last page"
+                                               "\n0 - Cancel")
+    world.send(OWNER_A, text="0")
+    assert world.state(message) == "needs_review" and not world.chat.files
+    # Agreeing signs at the bottom of the last page, away from both lines.
+    message = world.send(OWNER_A, make_pdf("Alice Example", "Alice Example", text="again"))
+    world.send(OWNER_A, text="1")
+    assert world.state(message) == "sent" and signer_names(world.chat.files[0][1]) == ["Alice Example"]
+
+
+def test_nobody_is_offered_the_end_of_the_page_unless_the_document_writes_the_name(world):
+    # Bruno's owner may use only Bruno's certificate, and the document never names Bruno.
+    message = world.send(OWNER_B, make_pdf("Carla Example", "Carla Example"))
+    assert world.state(message) == "needs_review" and "end of the last page" not in world.chat.to(OWNER_B)[-1]
 
 
 def test_a_signature_that_cannot_be_made_is_reported_with_the_name_of_its_signer(world, monkeypatch):

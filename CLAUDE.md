@@ -63,9 +63,17 @@ docker build -t sealwharf:local .
 
 ## Safety invariants
 
-- When a signature location or signer identity is ambiguous, the document must
-  not be signed. Changes to positioning or name matching must preserve this and
-  cover the ambiguous case with a test.
+- When the signer identity is ambiguous, the document must not be signed: the
+  full name, or a registered alias, must be written in the document, and not
+  only inside a sentence about the person. Changes to name matching must
+  preserve this and cover the ambiguous case with a test.
+- A place to sign is an empty area the code found and checked. The local model
+  only picks one of those places by letter, never gives coordinates, and is not
+  followed when the document says otherwise (another block names the person,
+  or the label's role belongs to someone else). Two people given one place get
+  neither. When no place is clear, the bot signs only where the requester
+  agrees (the end of the last page), and every signed document goes back with
+  a request to review it.
 - A certificate is used without the owner's approval only for its owner or a
   trusted contact. An approval covers the exact document that was sent, comes
   from the owner's number, is single-use and expires. People answer with a

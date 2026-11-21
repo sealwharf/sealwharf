@@ -136,7 +136,7 @@ def test_local_model_uncertainty_cannot_authorize_signature():
         assert review_contextual_candidate(document, "Jane Example", candidate, transport=transport) is None
 
 
-def test_worker_requires_local_review_for_contextual_form(tmp_path, monkeypatch):
+def test_worker_signs_a_form_section_that_names_the_signer_without_the_model(tmp_path, monkeypatch):
     sender = "5511999999999"
     signer = UnlockedSigner(SignerConfig("jane", "Jane Example", Path("certificate.p12"),
                                          allowed_senders=frozenset({sender})), b"password", b"fingerprint")
@@ -146,15 +146,12 @@ def test_worker_requires_local_review_for_contextual_form(tmp_path, monkeypatch)
     monkeypatch.setattr("sealwharf.application.worker.sign_pdf", lambda *args: b"signed")
     inbox = Inbox(tmp_path / "queue.db")
     inbox.add([("one", "media", "report.pdf", sender)])
-    assert process_one(inbox, client, (signer,))
-    assert not sent and len(notices) == 1
-    inbox.add([("two", "media", "report.pdf", sender)])
     def review(document, name, candidate):
         reviewed.append((name, candidate.reason))
         return candidate
+    # The empty place after "Signature:", in the section whose "Name:" is the signer, needs no model to be found.
     assert process_one(inbox, client, (signer,), review)
-    assert len(sent) == 1
-    assert reviewed == [("Jane Example", "contextual_signature_row")]
+    assert len(sent) == 1 and reviewed == []
 
 
 def test_worker_does_not_sign_rejected_contextual_candidate(tmp_path, monkeypatch):

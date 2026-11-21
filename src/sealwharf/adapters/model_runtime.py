@@ -48,6 +48,19 @@ class LocalModelSession:
         except (RuntimeError, ValueError, OSError, httpx.HTTPError):
             return None
 
+    def choose_place(self, document, signer_name):
+        """Return ("chosen", place), ("none", None), or ("unavailable", None) when the model cannot be asked."""
+        try:
+            self.ensure()
+            from .local_ai import NothingToChoose, choose_signature_place
+            try:
+                place = choose_signature_place(document, signer_name)
+            except NothingToChoose:
+                return "unavailable", None
+            return ("chosen", place) if place is not None else ("none", None)
+        except (RuntimeError, ValueError, OSError, httpx.HTTPError):
+            return "unavailable", None
+
     def suggest_general(self, document, signer_name):
         try:
             self.ensure()

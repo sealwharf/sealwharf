@@ -148,7 +148,8 @@ def main() -> None:
                 warn_expiring(inbox, client, signers, config.languages)
                 runtime.audit.prune(config.log_days)
                 last_warning = time.time()
-            if not process_one(inbox, client, signers, model.review_contextual, model.suggest_general, runtime):
+            if not process_one(inbox, client, signers, model.review_contextual, model.suggest_general, runtime,
+                               choose_place=model.choose_place):
                 time.sleep(2)
     except KeyboardInterrupt:
         log.info("session stopped")
