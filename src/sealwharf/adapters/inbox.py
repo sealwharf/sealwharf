@@ -8,6 +8,7 @@ import json
 import re
 import sqlite3
 import time
+import unicodedata
 from pathlib import Path
 from typing import NamedTuple
 
@@ -119,9 +120,7 @@ def accepted_events(messages: list[Incoming], senders: frozenset[str]) -> list[J
             continue
         if not isinstance(message.media_id, str) or not ID_PATTERN.fullmatch(message.media_id):
             continue
-        filename = message.filename
-        if not isinstance(filename, str) or not filename.strip() or len(filename) > 1024:
-            filename = None
+        filename = clean_filename(message.filename)
         mime = message.mime_type
         if (filename and SECRET_FILE.search(filename.strip())) or (isinstance(mime, str) and "pkcs12" in mime.casefold()):
             # Key material must never be fetched, stored or processed.
@@ -135,6 +134,20 @@ def accepted_events(messages: list[Incoming], senders: frozenset[str]) -> list[J
 
 # How many times a document may stop the worker before it is given up.
 MAX_ATTEMPTS = 5
+
+
+def clean_filename(name: object) -> str | None:
+    """The file name as people sent it, on one line: no line breaks, controls or text-direction marks, at most 200 characters.
+
+    The requester chooses the name, and it is shown in the bot's messages to other people, so it must not be able to
+    add lines or reorder what they read.
+    """
+    if not isinstance(name, str):
+        return None
+    visible = "".join(" " if char.isspace() else char for char in name if not unicodedata.category(char).startswith("C")
+                      or char.isspace())
+    return " ".join(visible.split())[:200] or None
+
 
 class Inbox:
     def __init__(self, path: Path):
@@ -168,7 +181,7 @@ class Inbox:
         return connection
 
     def add(self, jobs: list) -> None:
-        rows = [Job(*job) for job in jobs]
+        rows = [job._replace(filename=clean_filename(job.filename)) for job in (Job(*item) for item in jobs)]
         with self.connect() as db:
             db.executemany("INSERT OR IGNORE INTO jobs (message_id, media_id, filename, sender, kind, body) VALUES (?, ?, ?, ?, ?, ?)",
                            [tuple(job[:6]) for job in rows])

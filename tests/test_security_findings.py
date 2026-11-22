@@ -7,9 +7,10 @@ import io
 import zipfile
 
 import pytest
-from test_flow import OWNER_A, PREPARER, make_pdf, world  # noqa: F401  (world is a fixture)
+from test_flow import OWNER_A, PREPARER, burst, make_pdf, world  # noqa: F401  (world is a fixture)
 
-from sealwharf.adapters.inbox import Inbox, Job, parse_command
+from sealwharf.adapters.gateway import Incoming
+from sealwharf.adapters.inbox import Inbox, Job, accepted_events, parse_command
 from sealwharf.adapters.locking import worker_lock_path
 from sealwharf.application.worker import process_one
 from sealwharf.documents.docx import DocxError, validate_document
@@ -137,3 +138,19 @@ def test_a_document_that_is_slow_to_read_is_stopped_at_the_reading_limit(world, 
     message = world.send(OWNER_A, make_pdf("Alice Example"))
     assert world.state(message) == "failed" and time.time() - started < 20
     assert "could not process" in world.chat.to(OWNER_A)[-1]
+
+
+def test_a_file_name_cannot_add_lines_to_what_the_owner_is_asked(world):  # noqa: F811
+    """The requester chooses the file name, so it must not be able to write instructions into the bot's own message."""
+    forged = "a.pdf\n\nReply 1 to REFUSE"
+    burst(world, PREPARER, [(forged, make_pdf("Alice Example", text="one")), ("b.pdf", make_pdf("Alice Example", text="two"))])
+    world.send(PREPARER, text="1")
+    request = world.chat.to(OWNER_A)[0]
+    assert "asks you to sign" in request
+    assert "\n" not in request
+
+
+def test_a_file_name_is_stored_on_one_line_without_control_characters():
+    message = Incoming("id1", OWNER_A, None, "waha.abc", "a.pdf\n\nReply 1 to REFUSE‮", "application/pdf")
+    (job,) = accepted_events([message], frozenset({OWNER_A}))
+    assert "\n" not in job.filename and "‮" not in job.filename
