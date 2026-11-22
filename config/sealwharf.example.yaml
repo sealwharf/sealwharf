@@ -1,6 +1,6 @@
 # Copy this file to config/sealwharf.yaml and fill it in. It is the only file to edit.
 # It holds passwords and tokens, so keep it private; Git ignores it.
-# The Cloudflare tunnel token goes alone in a file of its own: config/tunnel-token.
+# The Cloudflare tunnel token goes alone in a file of its own: secrets/tunnel-token, next to config/.
 # After editing, check it with: docker compose run --rm sealwharf check
 
 public_url: https://bot.example.com # the public hostname of your Cloudflare tunnel

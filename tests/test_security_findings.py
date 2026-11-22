@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, TextStringObject
-from test_flow import OWNER_A, PREPARER, burst, make_pdf, world  # noqa: F401  (world is a fixture)
+from test_flow import OWNER_A, PREPARER, TRUSTED, burst, make_pdf, world  # noqa: F401  (world is a fixture)
 
 from sealwharf.adapters.gateway import Incoming
 from sealwharf.adapters.inbox import Inbox, Job, accepted_events, parse_command
@@ -188,3 +188,11 @@ def test_a_pdf_that_runs_a_script_when_opened_is_not_signed():
 def test_a_media_address_with_encoded_dots_is_not_fetched():
     """`%2e%2e` is `..` to a server that decodes the path, so it must not pass as a stored file."""
     assert _media_id("http://gateway:3000/api/files/%2e%2e/%2e%2e/api/sessions") == NO_MEDIA
+
+
+def test_bot_status_lists_only_the_certificates_the_asker_may_use(world):  # noqa: F811
+    """TRUSTED may use Alice's certificate only, yet is told who else has a certificate here and when each expires."""
+    world.send(TRUSTED, text="bot status")
+    report = world.chat.to(TRUSTED)[-1]
+    assert "Alice Example" in report
+    assert "Bruno Example" not in report and "Carla Example" not in report

@@ -676,7 +676,9 @@ def _handle_command(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
     if action == "ping":
         client.send_text(job.sender, wake_reply(runtime.language(job.sender)))
     elif action == "status":
-        client.send_text(job.sender, status_report(inbox, signers, runtime.language(job.sender)))
+        # Each person hears only about the certificates they may use: who else has one here is not theirs to know.
+        usable = tuple(signer for signer in signers if job.sender in signer.config.allowed_senders)
+        client.send_text(job.sender, status_report(inbox, usable, runtime.language(job.sender)))
     elif action == "help":
         runtime.say(client, job.sender, "help")
     elif action == "log":

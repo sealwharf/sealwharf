@@ -7,6 +7,7 @@ __pycache__/
 
 # Private state: configuration with secrets, certificates, documents and runtime data.
 /data/
+/secrets/
 /config/*
 !/config/requirements-lock.txt
 !/config/requirements-dev.txt

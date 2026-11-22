@@ -34,8 +34,13 @@ def create_app(*, secret: str, sender: str | frozenset[str], db_path: Path,
         return {"status": "ok"}
 
     @app.get("/ready")
-    def ready():
-        """Report whether the signing worker is alive, for the container health check."""
+    def ready(request: Request):
+        """Report whether the signing worker is alive, for the container health check, which runs inside the container.
+
+        Asked from anywhere else, such as through the tunnel, it does not exist.
+        """
+        if request.client is None or request.client.host not in ("127.0.0.1", "::1"):
+            raise HTTPException(status_code=404)
         beat = inbox.get_mark("heartbeat")
         if beat is None or time.time() - beat > HEARTBEAT_SECONDS:
             raise HTTPException(status_code=503)

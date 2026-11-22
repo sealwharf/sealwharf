@@ -48,7 +48,6 @@ def project(tmp_path, monkeypatch):
                           f'certificates:\n  - id: john\n    name: {name}\n    file: certificates/john.p12\n'
                           f'    password: "{password}"\n    owner: john\n', encoding="utf-8")
     write()
-    (config.parent / "tunnel-token").write_text("tunnel-secret\n", encoding="utf-8")
     return write
 
 
@@ -74,13 +73,9 @@ def test_check_lists_every_problem_at_once(project):
         raise AssertionError("No token, so the channel must not be contacted")
     ready, report = run_check(disconnected)
     assert not ready
-    from sealwharf.paths import tunnel_token_path
-    tunnel_token_path().unlink()
-    ready, report = run_check(disconnected)
-    for expected in ("public_url is missing", "gateway_token is missing", "config/tunnel-token must hold the tunnel token, alone",
-                     "Could not open certificate john"):
+    for expected in ("public_url is missing", "gateway_token is missing", "Could not open certificate john"):
         assert expected in report
-    assert report.endswith("4 problem(s) to fix in config/sealwharf.yaml.") and "wrong" not in report.replace("wrong PIN", "")
+    assert report.endswith("3 problem(s) to fix in config/sealwharf.yaml.") and "wrong" not in report.replace("wrong PIN", "")
 
 
 def test_check_reports_name_mismatch_channel_failure_and_unreadable_file(project):
@@ -124,7 +119,10 @@ def test_webhook_secret_is_created_once_in_the_data_folder(project, tmp_path):
 
 def test_readiness_follows_the_worker_heartbeat(tmp_path):
     database = tmp_path / "inbox.db"
-    client = TestClient(create_app(read=read_messages, secret=SECRET, sender="5511900000001", db_path=database))
+    app = create_app(read=read_messages, secret=SECRET, sender="5511900000001", db_path=database)
+    # Through the tunnel the readiness check does not exist; the health check asks from inside the container.
+    assert TestClient(app, client=("198.51.100.7", 40000)).get("/ready").status_code == 404
+    client = TestClient(app, client=("127.0.0.1", 40000))
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/ready").status_code == 503
     inbox = Inbox(database)

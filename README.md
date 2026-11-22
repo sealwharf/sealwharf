@@ -36,7 +36,7 @@ In the Cloudflare dashboard, open **Networking → Tunnels** and create a tunnel
 
 Cloudflare shows a command to install a program. **Do not install anything.** Just copy the long text at the end of that command, starting with `eyJ`: that is the *tunnel token*.
 
-In the project folder, create a file named `tunnel-token` inside `config/` and paste the token into it, alone, on one line. The file has no extension: in Notepad, choose **Save as type: All files** so it is not saved as `tunnel-token.txt`. Git ignores it, like the rest of `config/`.
+In the project folder, create a folder named `secrets`, and in it a file named `tunnel-token`; paste the token into it, alone, on one line. The file has no extension: in Notepad, choose **Save as type: All files** so it is not saved as `tunnel-token.txt`. Git ignores the `secrets` folder. It stays apart from `config/` so that only the tunnel reads it, never the part of the bot that opens documents.
 
 Leave the Cloudflare page open; you will come back to it in step 5.
 
@@ -440,7 +440,7 @@ docker compose run --rm sealwharf check
 | --- | --- |
 | The bot does not answer `wake up bot` | Run `docker compose ps`. The bot must show `healthy`. Confirm that your number is in `contacts` and that the gateway is linked to WhatsApp: on Whapi.Cloud the channel must be connected, on WAHA the session must be `WORKING`. |
 | `docker compose ps` shows the bot restarting | Run `docker compose logs sealwharf` and the check above. The usual causes are a mistake in the configuration or the Cloudflare route from step 5 not created yet, or pointing to another address than `http://sealwharf:8000`. Run `docker compose logs tunnel` to see the tunnel. |
-| "tunnel_token now has a file of its own" | Move the token from `config/sealwharf.yaml` into `config/tunnel-token`, alone, and delete the `tunnel_token` line. In the Cloudflare route, change the service to `http://sealwharf:8000`. |
+| "tunnel_token now has a file of its own" | Move the token from `config/sealwharf.yaml` into `secrets/tunnel-token`, alone, and delete the `tunnel_token` line. In the Cloudflare route, change the service to `http://sealwharf:8000`. |
 | "I could not find a clear place to sign" | Answer `1` to sign at the end of the last page, or `0` to cancel. If the bot does not offer that, the document does not write the signer's full name as in the certificate, or the last page has no room. |
 | "I did not find in this document the full name of anyone" | The names in the document differ from the certificates, for example with a middle name left out. Add that spelling to the certificate with `aliases`. |
 | `docker compose ps` shows the bot waiting, or "reaching the local AI model" in its logs | The AI model is still downloading or did not start. Run `docker compose up model` to see the download, and `docker compose ps ollama` to check the model service. |
@@ -468,6 +468,7 @@ To get exactly the same result as on your computer, do one of these:
 ## Good to know
 
 - **Your number stays yours.** The WhatsApp number can still be used for ordinary conversations. The bot only looks at documents and at the exact messages `wake up bot` (or its Portuguese or Spanish form) and the commands `bot status`, `bot log` and `bot help` sent by the numbers in `contacts`, and at the answer to a question it has just asked. Every other message, from anyone, is ignored and never stored.
+- **Protect the address from floods.** Anyone who finds the bot's address can send it requests; without the secret they are refused, but thousands per second still keep it busy. In the Cloudflare dashboard, open your domain, then **Security → WAF → Rate limiting rules**, and create a rule: when the URI path equals `/webhook`, with the same IP address, more than 100 requests in 10 seconds, then **Block** for 1 minute. The gateway sends far fewer than that.
 - **Privacy.** Documents and certificates are processed on your computer. The gateway and Cloudflare only carry the messages. Certificates and passwords are never accepted through the chat: a `.p12` file sent to the bot is refused without being opened.
 - **Record of signatures.** Every signature is recorded with the time, the name of the file, who asked, who approved and the fingerprint of the document. The section "Logs" below tells who may read it and for how long it is kept.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.

@@ -21,14 +21,18 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # It opens documents from other people: a file that grows without end stops at these bounds.
+    mem_limit: 2g
+    pids_limit: 200
     depends_on:
       model:
         condition: service_completed_successfully
 
   # Publishes the webhook at the fixed public address, from the official Cloudflare image.
-  # In the Cloudflare route, the service is http://sealwharf:8000. Its token is config/tunnel-token.
+  # In the Cloudflare route, the service is http://sealwharf:8000. Its token is secrets/tunnel-token,
+  # outside config/, so the container that opens documents never sees it.
   tunnel:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.11.1
     restart: unless-stopped
     command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/tunnel_token"]
     secrets:
@@ -38,6 +42,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 100
 
   # Optional smart-card reader for USB tokens: docker compose --profile token up -d
   reader:
@@ -56,7 +62,7 @@ services:
   # The local AI model that reads the documents to find where each person signs.
   # It runs on this computer, and documents never leave it.
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.16
     restart: unless-stopped
     volumes:
       - models:/root/.ollama
@@ -68,7 +74,7 @@ services:
   # Downloads the model on the first start (about 3 GB) and finds it already there on the next ones.
   # The name must match MODEL in src/sealwharf/adapters/local_ai.py.
   model:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.16
     environment:
       OLLAMA_HOST: http://ollama:11434
     entrypoint: ["/bin/sh", "-c", "ollama show qwen3-vl:4b > /dev/null 2>&1 || ollama pull qwen3-vl:4b"]
@@ -79,7 +85,7 @@ services:
 
 secrets:
   tunnel_token:
-    file: ./config/tunnel-token
+    file: ./secrets/tunnel-token
 
 volumes:
   data:

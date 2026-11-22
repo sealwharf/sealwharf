@@ -738,8 +738,9 @@ def test_verify_command_checks_every_signature_without_signing(world):
     message = world.send(PREPARER, signed, caption="verify")
     report = world.chat.to(PREPARER)[-1]
     assert world.state(message) == "verified" and len(world.chat.files) == 1
-    assert "2 signature(s) found" in report and "All signatures are valid." in report
-    assert "Alice Example: VALID" in report and "Bruno Example: VALID" in report
+    assert "2 signature(s) found" in report and "Every signature is intact." in report
+    assert "Alice Example: INTACT (unchanged since it was signed)" in report and "Bruno Example: INTACT" in report
+    assert "this does not confirm who signed" in report
     # A caption works too, and tampering is detected.
     tampered = signed.replace(b"Alice Example) Tj", b"Alicx Example) Tj", 1)
     world.send(PREPARER, tampered, caption="verify")
@@ -766,7 +767,7 @@ def test_bot_status_lists_the_certificates_with_their_expiry_dates(world):
     report = world.chat.to(PREPARER)[0].splitlines()
     expiry = world.signers[0].expires_at.date().isoformat()
     assert world.state(message) == "done" and len(world.chat.to(PREPARER)) == 1
-    assert report[0] == "Up and running. Certificates installed: 3."
+    assert report[0] == "Up and running. Certificates you may use: 3."
     assert report[1] == f"1. Alice Example (file): valid until {expiry}, 364 day(s) left"
     assert all(name in line for name, line in zip(NAMES.values(), report[1:4], strict=True))
     assert report[4] == "Documents waiting for an answer: 0." and len(report) == 5
@@ -779,7 +780,7 @@ def test_bot_status_lists_the_certificates_with_their_expiry_dates(world):
         world.inbox, world.signers, "en", now=soon)
     assert f"1. Alice Example (file): EXPIRED on {expiry}" in status_report(world.inbox, world.signers, "en", now=late)
     portuguese = status_report(world.inbox, world.signers, "pt-br", now=now).splitlines()
-    assert portuguese[0] == "Tudo funcionando. Certificados instalados: 3."
+    assert portuguese[0] == "Tudo funcionando. Certificados que você pode usar: 3."
     assert portuguese[1] == f"1. Alice Example (arquivo): válido até {expiry}, faltam 364 dia(s)"
     assert status_report(world.inbox, world.signers, "es", now=now).splitlines()[-1] == "Documentos esperando respuesta: 1."
     token = (replace(world.signers[0], config=replace(world.signers[0].config, token_module=Path("module.so"), token_label="t")),)

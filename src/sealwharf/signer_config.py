@@ -108,7 +108,7 @@ def load_config(path: Path) -> AppConfig:
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError("Could not read the configuration file.") from exc
     if isinstance(config, dict) and "tunnel_token" in config:
-        raise ValueError("tunnel_token now has a file of its own: put the token alone in config/tunnel-token "
+        raise ValueError("tunnel_token now has a file of its own: put the token alone in secrets/tunnel-token "
                          "and remove the tunnel_token line.")
     if not isinstance(config, dict) or set(config) - set(SETTINGS):
         raise ValueError("The configuration may contain only " + ", ".join(SETTINGS[:-2]) + " and " + SETTINGS[-2] + ".")
