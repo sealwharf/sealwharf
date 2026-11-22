@@ -12,7 +12,8 @@ from ..documents.validation import DocumentError
 from .gateway import HEADER, NUMBER, Gateway, GatewayError, Incoming
 
 DIRECT = re.compile(r"([0-9]{5,20})@(c\.us|s\.whatsapp\.net|lid)")
-FILE_PATH = re.compile(r"/api/files/[A-Za-z0-9._%@/-]{1,140}")
+# No "%": an encoded "%2e%2e" is ".." to a server that decodes the path.
+FILE_PATH = re.compile(r"/api/files/[A-Za-z0-9._@/-]{1,140}")
 MEDIA_PREFIX = "waha."
 NO_MEDIA = MEDIA_PREFIX + "none"  # a file the gateway did not fetch; downloading it fails
 NOT_DOCUMENTS = ("audio/", "video/")

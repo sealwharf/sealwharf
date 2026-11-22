@@ -7,13 +7,19 @@ import io
 import zipfile
 
 import pytest
+from fastapi.testclient import TestClient
+from pypdf import PdfWriter
+from pypdf.generic import DictionaryObject, NameObject, TextStringObject
 from test_flow import OWNER_A, PREPARER, burst, make_pdf, world  # noqa: F401  (world is a fixture)
 
 from sealwharf.adapters.gateway import Incoming
 from sealwharf.adapters.inbox import Inbox, Job, accepted_events, parse_command
 from sealwharf.adapters.locking import worker_lock_path
+from sealwharf.adapters.waha import NO_MEDIA, _media_id
+from sealwharf.app import create_app
 from sealwharf.application.worker import process_one
 from sealwharf.documents.docx import DocxError, validate_document
+from sealwharf.documents.validation import DocumentError, validate_pdf
 
 # Approval by the owner.
 
@@ -154,3 +160,31 @@ def test_a_file_name_is_stored_on_one_line_without_control_characters():
     message = Incoming("id1", OWNER_A, None, "waha.abc", "a.pdf\n\nReply 1 to REFUSE‮", "application/pdf")
     (job,) = accepted_events([message], frozenset({OWNER_A}))
     assert "\n" not in job.filename and "‮" not in job.filename
+
+
+def test_a_deeply_nested_webhook_body_is_refused_not_an_internal_error(tmp_path):
+    secret = "s" * 40
+    client = TestClient(create_app(read=lambda payload: [], secret=secret, sender=OWNER_A, db_path=tmp_path / "inbox.db"),
+                        raise_server_exceptions=False)
+    response = client.post("/webhook", content=b"[" * 100_000, headers={"X-Sealwharf-Secret": secret})
+    assert response.status_code == 400
+
+
+# Smaller hardening points.
+
+def test_a_pdf_that_runs_a_script_when_opened_is_not_signed():
+    """A signature lends the holder's name to the file; one that runs code in the reader should not receive it."""
+    writer = PdfWriter()
+    writer.add_blank_page(width=600, height=800)
+    script = DictionaryObject({NameObject("/S"): NameObject("/JavaScript"),
+                               NameObject("/JS"): TextStringObject("app.alert('What you approved is not what is shown');")})
+    writer._root_object[NameObject("/OpenAction")] = writer._add_object(script)
+    output = io.BytesIO()
+    writer.write(output)
+    with pytest.raises(DocumentError):
+        validate_pdf(output.getvalue())
+
+
+def test_a_media_address_with_encoded_dots_is_not_fetched():
+    """`%2e%2e` is `..` to a server that decodes the path, so it must not pass as a stored file."""
+    assert _media_id("http://gateway:3000/api/files/%2e%2e/%2e%2e/api/sessions") == NO_MEDIA

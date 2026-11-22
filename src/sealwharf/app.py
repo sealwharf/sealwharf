@@ -53,7 +53,8 @@ def create_app(*, secret: str, sender: str | frozenset[str], db_path: Path,
                 raise HTTPException(status_code=413)
         try:
             payload = json.loads(body)
-        except (ValueError, UnicodeDecodeError):
+        except (ValueError, UnicodeDecodeError, RecursionError):
+            # A body nested too deep to read is as unreadable as a broken one.
             raise HTTPException(status_code=400) from None
         # An adapter may ask its gateway who a hidden sender is, so it runs off the event loop.
         inbox.add(accepted_events(await run_in_threadpool(read, payload), senders))
