@@ -23,7 +23,7 @@ command a reader needs.
 
 ## Layout
 
-- `src/sealwharf/documents/`: DOCX conversion, signature positioning, appearance,
+- `src/sealwharf/documents/`: DOCX and ODT conversion, signature positioning, appearance,
   signing, validation and signature verification.
 - `src/sealwharf/application/`: `signers.py` opens the certificates;
   `worker.py` is the request flow (roles, owner approval, sequential

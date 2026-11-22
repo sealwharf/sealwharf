@@ -46,7 +46,7 @@ def signed_filename(original: str | None, suffix: str = " - signed") -> str:
     name = original.replace("\\", "/").rsplit("/", 1)[-1]
     name = "".join(c for c in name if not unicodedata.category(c).startswith("C"))
     name = re.sub(r"[<>:\"|?*]", "_", name).strip()
-    if name.lower().endswith((".pdf", ".docx")):
+    if name.lower().endswith((".pdf", ".docx", ".odt")):
         name = name.rsplit(".", 1)[0].rstrip(" .")
     return f"{name.strip(' .')[:200] or 'document'}{suffix}.pdf"
 

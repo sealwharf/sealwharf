@@ -277,8 +277,9 @@ def test_the_signer_that_failed_among_several_is_named_and_nothing_is_signed(wor
     monkeypatch.setattr("sealwharf.application.worker.sign_pdf", second_fails)
     while process_one(world.inbox, world.chat, world.signers, runtime=portuguese):
         pass
-    assert world.chat.to(OWNER_A)[-1] == ("Veja o que aconteceu com os seus documentos:\n- Assinado: a.pdf\n"
-                                          "- NÃO assinado, a assinatura de Bruno Example não pôde ser feita: b.pdf" + REVIEW["pt-br"])
+    assert world.chat.to(OWNER_A)[-1] == ("Aqui está o resultado de 2 documentos:\n\n✅ Assinados (1)\n• a.pdf\n\n"
+                                          "❌ NÃO assinado, a assinatura de Bruno Example não pôde ser feita (1)\n• b.pdf\n"
+                                          + REVIEW["pt-br"])
 
 
 def test_a_person_the_document_only_talks_about_is_not_taken_as_a_signer(world):
@@ -402,7 +403,7 @@ def test_an_owner_who_lets_several_documents_expire_is_told_once(world):
     asked = len(world.chat.to(OWNER_A))
     later(world, 6)
     assert world.chat.to(OWNER_A)[asked:] == [
-        "Here is what happened with your documents:\n- NOT signed, the time to approve has ended: one.pdf, two.pdf"]
+        "Here is how 2 documents went:\n\n❌ NOT signed, the time to approve has ended (2)\n• one.pdf\n• two.pdf"]
     assert not list((world.tmp_path / "data" / "pending").glob("*.pdf"))
 
 
@@ -590,8 +591,25 @@ def test_documents_sent_together_by_their_owner_get_one_note_and_one_summary(wor
     assert [world.state(message) for message in messages] == ["sent", "sent", "needs_review"]
     assert [name for _, _, name in world.chat.files] == ["a.pdf", "b.pdf"]
     assert [text for _, text in world.chat.notes] == ["Got it! Working on it..."]
-    assert world.chat.to(OWNER_A) == ["Here is what happened with your documents:\n- Signed: a.pdf, b.pdf\n"
-                                      "- NOT signed, no signer's name found: c.pdf" + REVIEW["en"]]
+    assert world.chat.to(OWNER_A) == ["Here is how 3 documents went:\n\n✅ Signed (2)\n• a.pdf\n• b.pdf\n\n"
+                                      "❌ NOT signed, no signer's name found (1)\n• c.pdf\n"
+                                      + REVIEW["en"].replace("document,", "documents,").replace("it on", "them on")]
+
+
+def test_a_batch_summary_counts_and_groups_every_outcome_in_order(world):
+    # Signed at once, sent to an owner, and with nobody named; files in the order people number them.
+    documents = [(f"{index} doc.pdf", make_pdf("Alice Example", str(index))) for index in (10, 2, 1)]
+    documents += [("3 nobody.pdf", make_pdf("Somebody Else"))]
+    burst(world, OWNER_A, documents)
+    summary = world.chat.to(OWNER_A)[0]
+    assert summary == ("Here is how 4 documents went:\n\n✅ Signed (3)\n• 1 doc.pdf\n• 2 doc.pdf\n• 10 doc.pdf\n\n"
+                       "❌ NOT signed, no signer's name found (1)\n• 3 nobody.pdf" + "\n\nPlease review the signed documents, including where each signature was placed, before sending them on.")
+    # A preparer's batch: what waits for the owner is its own group, with the owner named.
+    burst(world, PREPARER, [("b.pdf", make_pdf("Alice Example", "b")), ("a.pdf", make_pdf("Alice Example", "a")),
+                            ("c.pdf", make_pdf("Somebody Else", "c"))])
+    world.send(PREPARER, text="1")
+    waiting = world.chat.to(PREPARER)[-1]
+    assert waiting.startswith("Here is how 2 documents went:\n\n⏳ Sent to Ana for approval (2)\n• a.pdf\n• b.pdf")
 
 
 def test_documents_sent_together_are_asked_and_approved_as_one(world):
@@ -607,8 +625,7 @@ def test_documents_sent_together_are_asked_and_approved_as_one(world):
         "Hello! Paulo Preparer (+55 11 90000-0010) asks you to sign the following 3 documents with your digital certificate: "
         "a.pdf, b.pdf, c.pdf. Reply 1 to approve all of them. Reply 0, or simply ignore this message, to refuse all of them."]
     assert [(recipient, name) for recipient, _, name in world.chat.forwarded] == [(OWNER_A, "a.pdf"), (OWNER_A, "b.pdf"), (OWNER_A, "c.pdf")]
-    assert world.chat.to(PREPARER)[-1] == ("Here is what happened with your documents:\n"
-                                           "- Sent to Ana for approval: a.pdf, b.pdf, c.pdf")
+    assert world.chat.to(PREPARER)[-1] == "Here is how 3 documents went:\n\n⏳ Sent to Ana for approval (3)\n• a.pdf\n• b.pdf\n• c.pdf"
     assert not world.chat.files and world.audit.entries() == []
     world.send(OWNER_A, text="1")
     assert [world.state(message) for message in messages] == ["sent"] * 3
@@ -616,8 +633,9 @@ def test_documents_sent_together_are_asked_and_approved_as_one(world):
     # Each approval still covers exactly one document, and each signature is recorded.
     entries = world.audit.entries()
     assert [entry["approval"] for entry in entries] == ["confirmed"] * 3 and len({entry["document_sha256"] for entry in entries}) == 3
-    assert world.chat.to(OWNER_A)[-1] == "Here is what happened with your documents:\n- Approved and signed: a.pdf, b.pdf, c.pdf"
-    assert world.chat.to(PREPARER)[-1] == "Here is what happened with your documents:\n- Signed: a.pdf, b.pdf, c.pdf" + REVIEW["en"]
+    assert world.chat.to(OWNER_A)[-1] == "Here is how 3 documents went:\n\n✅ Approved and signed (3)\n• a.pdf\n• b.pdf\n• c.pdf"
+    assert world.chat.to(PREPARER)[-1] == ("Here is how 3 documents went:\n\n✅ Signed (3)\n• a.pdf\n• b.pdf\n• c.pdf"
+                                           "\n\nPlease review the signed documents, including where each signature was placed, before sending them on.")
 
 
 def test_refusing_a_batch_refuses_every_document_in_it(world):
@@ -626,8 +644,8 @@ def test_refusing_a_batch_refuses_every_document_in_it(world):
     world.send(OWNER_A, text="0")
     assert [world.state(message) for message in messages] == ["needs_review"] * 2
     assert not world.chat.files and world.audit.entries() == []
-    assert world.chat.to(OWNER_A)[-1] == "Here is what happened with your documents:\n- Refused: a.pdf, b.pdf"
-    assert "NOT signed (not approved in time, refused or failed): a.pdf, b.pdf" in world.chat.to(PREPARER)[-1]
+    assert world.chat.to(OWNER_A)[-1] == "Here is how 2 documents went:\n\n❌ Refused (2)\n• a.pdf\n• b.pdf"
+    assert "❌ NOT signed (not approved in time, refused or failed) (2)\n• a.pdf\n• b.pdf" in world.chat.to(PREPARER)[-1]
     assert not list((world.tmp_path / "data" / "pending").glob("*.pdf"))
 
 
@@ -638,8 +656,8 @@ def test_a_changed_document_in_a_batch_is_not_signed_while_the_others_are(world)
     world.runtime.pending_file(tampered.request_id).write_bytes(make_pdf("Alice Example", "Bruno Example"))
     world.send(OWNER_A, text="1")
     assert [name for _, _, name in world.chat.files] == ["b.pdf"] and len(world.audit.entries()) == 1
-    assert "- NOT signed, signing failed: a.pdf" in world.chat.to(OWNER_A)[-1]
-    assert "- Approved and signed: b.pdf" in world.chat.to(OWNER_A)[-1]
+    assert "❌ NOT signed, signing failed (1)\n• a.pdf" in world.chat.to(OWNER_A)[-1]
+    assert "✅ Approved and signed (1)\n• b.pdf" in world.chat.to(OWNER_A)[-1]
 
 
 def test_documents_with_different_questions_are_asked_separately(world):
@@ -815,7 +833,7 @@ def test_bot_log_shows_each_person_only_the_signatures_they_took_part_in(world):
 def test_bot_help_lists_the_commands_in_the_language_of_whoever_asks(world):
     message = world.send(OWNER_A, text="Bot Help")
     assert world.state(message) == "done" and len(world.chat.to(OWNER_A)) == 1
-    assert world.chat.to(OWNER_A)[0].startswith("This is what you can send me:\n- A PDF or Word document")
+    assert world.chat.to(OWNER_A)[0].startswith("This is what you can send me:\n- A PDF, Word or LibreOffice document")
     portuguese = Runtime(world.runtime.data_dir, languages={OWNER_B: "pt-br"})
     world.inbox.add([Job("help-pt", "", None, OWNER_B, "text", parse_command("bothelp"))])
     assert process_one(world.inbox, world.chat, world.signers, runtime=portuguese)
@@ -886,7 +904,7 @@ def test_requests_are_limited_per_number(world):
     for _ in range(3):
         assert process_one(world.inbox, world.chat, world.signers, runtime=limited)
     assert len(world.chat.files) == 2 and world.state("limit2") == "rate_limited"
-    assert "- NOT signed, over the hourly limit: report.pdf" in world.chat.to(OWNER_A)[-1]
+    assert "❌ NOT signed, over the hourly limit (1)\n• report.pdf" in world.chat.to(OWNER_A)[-1]
 
 
 def test_owner_is_warned_once_a_day_thirty_days_before_expiry(tmp_path):

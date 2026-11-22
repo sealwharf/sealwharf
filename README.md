@@ -6,7 +6,7 @@
 
 <p align="center">Sign documents by sending them to a WhatsApp number.</p>
 
-Send a PDF or Word document and get it back digitally signed. Sealwharf runs on your own computer, in Docker, so your certificates and documents never leave it.
+Send a PDF, Word or LibreOffice document and get it back digitally signed. Sealwharf runs on your own computer, in Docker, so your certificates and documents never leave it.
 
 - It reads the document to find where each person signs: a name under a line is enough, and a local AI model interprets the rest, such as a form with the name in one field and "Signature:" further down.
 - It can sign with certificate files (`.p12`, `.pfx`) and with USB tokens.
@@ -101,7 +101,7 @@ A minute later the bot is ready. To confirm, send it the words `wake up bot` fro
 
 ## Using it
 
-Send a PDF or Word document to the bot. It answers that it received the file and, a few seconds later, sends back the signed PDF.
+Send a PDF, Word (`.docx`) or LibreOffice Writer (`.odt`) document to the bot. It answers that it received the file and, a few seconds later, sends back the signed PDF.
 
 For the bot to find where to sign, **the document needs each signer's full name, as in the certificate, near an empty place to sign**. The simplest case is a name under a line:
 
@@ -122,7 +122,7 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 
 | You send | The bot does |
 | --- | --- |
-| A PDF or Word document | Signs it and sends it back. |
+| A PDF, Word or LibreOffice document | Signs it and sends it back. |
 | `1`, `2`, `0`… or a word such as `yes`, `no`, `all` | Takes it as your answer to the question it just asked. |
 | A PDF with the caption `verify` (or `verificar`) | Checks the signatures of that PDF, without signing. |
 | `wake up bot` | Answers with a short, playful line, to show it is working. |
@@ -453,7 +453,7 @@ docker compose run --rm sealwharf check
 
 ## Fonts in Word documents
 
-A Word document is converted to PDF before it is signed, and the conversion needs the fonts the document was written with. Sealwharf already has:
+A Word or LibreOffice document is converted to PDF before it is signed, and the conversion needs the fonts the document was written with. Sealwharf already has:
 
 - free fonts with the same widths as Arial, Times New Roman, Courier New, Calibri, Cambria, Helvetica and Palatino, so documents written with those keep every line in place;
 - free fonts common in documents written on the web: Roboto, Open Sans, Lato, Noto, Inter, EB Garamond, Comfortaa and Lobster.

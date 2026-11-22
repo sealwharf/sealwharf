@@ -1,4 +1,4 @@
-"""Conservative DOCX validation and local LibreOffice conversion."""
+"""Conservative validation of Word (DOCX) and LibreOffice Writer (ODT) files, and local conversion to PDF."""
 
 import re
 import shutil
@@ -35,6 +35,16 @@ SAME_WIDTH = {
 }
 # LibreOffice draws these with its own symbol font.
 SYMBOL_FONTS = frozenset({"symbol", "wingdings", "wingdings 2", "wingdings 3", "webdings"})
+# A LibreOffice Writer text document names its type in a first, uncompressed "mimetype" entry.
+ODT_MIMETYPE = b"application/vnd.oasis.opendocument.text"
+ODF_XLINK = "http://www.w3.org/1999/xlink"
+ODF_STYLE = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ODF_SVG = "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
+# Elements that run code, embed other programs or pull content from elsewhere when a document is opened.
+ODT_UNSAFE = frozenset({"scripts", "script", "event-listener", "event-listeners", "dde-connection-decl",
+                        "dde-connection-decls", "dde-connection", "section-source", "object", "object-ole", "applet",
+                        "plugin", "floating-frame", "database-display", "database-next", "database-row-select",
+                        "database-row-number", "database-name"})
 UNSAFE_FIELD =re.compile(r"\b(?:DDE|DDEAUTO|LINK|HYPERLINK|INCLUDETEXT|INCLUDEPICTURE|DATABASE)\b", re.IGNORECASE)
 
 
@@ -49,6 +59,72 @@ def _parse_xml(data: bytes):
         return ElementTree.fromstring(data)
     except ElementTree.ParseError as exc:
         raise DocxError("Invalid DOCX XML.") from exc
+
+
+def is_opendocument(data: bytes) -> bool:
+    """Whether the file is a LibreOffice Writer text document (.odt)."""
+    try:
+        with ZipFile(BytesIO(data)) as package:
+            first = package.infolist()[0]
+            return first.filename == "mimetype" and package.read(first)[:100].strip() == ODT_MIMETYPE
+    except (BadZipFile, OSError, IndexError, RuntimeError, ValueError, KeyError):
+        return False
+
+
+def _check_entries(package: ZipFile, kind: str) -> set[str]:
+    """Refuse oversized packages, odd paths, encrypted entries and embedded programs; return the entry names."""
+    members = package.infolist()
+    if len(members) > MAX_MEMBERS or sum(item.file_size for item in members) > MAX_UNCOMPRESSED_BYTES:
+        raise DocxError(f"{kind} package exceeds resource limits.")
+    names: set[str] = set()
+    for item in members:
+        name = item.filename
+        lower = name.casefold()
+        path = PurePosixPath(name)
+        if (not name or "\\" in name or name.startswith("/") or ".." in path.parts
+                or ":" in name or lower in names or item.flag_bits & 1):
+            raise DocxError(f"Unsupported {kind} package entry.")
+        names.add(lower)
+        if ("vbaproject" in lower or "vbadat" in lower or "/activex/" in lower or "/embeddings/" in lower
+                or lower.endswith(".exe") or lower.startswith(("basic/", "scripts/")) or lower.startswith("object ")):
+            raise DocxError("Embedded active content is not supported.")
+    return names
+
+
+def validate_odt(data: bytes) -> None:
+    """Reject LibreOffice documents with macros, embedded objects, scripts or links to outside content."""
+    if len(data) > MAX_DOCX_BYTES or not is_opendocument(data):
+        raise DocxError("Invalid or oversized ODT file.")
+    try:
+        with ZipFile(BytesIO(data)) as package:
+            names = _check_entries(package, "ODT")
+            if "content.xml" not in names or "meta-inf/manifest.xml" not in names:
+                raise DocxError("Missing ODT document parts.")
+            for item in package.infolist():
+                if not item.filename.casefold().endswith(".xml"):
+                    continue
+                root = _parse_xml(package.read(item))
+                for node in root.iter():
+                    local = node.tag.rsplit("}", 1)[-1]
+                    # LibreOffice always writes an empty list of scripts; only one with something in it is refused.
+                    if local in ODT_UNSAFE and not (local in {"scripts", "event-listeners"} and len(node) == 0):
+                        raise DocxError("Scripts, embedded objects and linked content are not supported.")
+                    target = node.get(f"{{{ODF_XLINK}}}href", "")
+                    if re.match(r"(?i)^[a-z][a-z0-9+.-]*:|^//|^\.\./", target):
+                        raise DocxError("Links to outside content are not supported.")
+    except DocxError:
+        raise
+    except (BadZipFile, OSError, RuntimeError, ValueError, KeyError) as exc:
+        raise DocxError("Invalid ODT package.") from exc
+
+
+def validate_document(data: bytes) -> str:
+    """Check a word-processor file and return its kind: "odt" for LibreOffice Writer, "docx" for Word."""
+    if is_opendocument(data):
+        validate_odt(data)
+        return "odt"
+    validate_docx(data)
+    return "docx"
 
 
 def validate_docx(data: bytes) -> None:
@@ -129,8 +205,23 @@ def _fonts_in(node, theme: dict[str, str]) -> list[str]:
     return fonts
 
 
+def _odt_fonts(data: bytes) -> list[str]:
+    """Fonts a LibreOffice document declares for its text."""
+    fonts = []
+    with ZipFile(BytesIO(data)) as package:
+        for name in ("styles.xml", "content.xml"):
+            if name in package.namelist():
+                root = _parse_xml(package.read(name))
+                for face in root.iter(f"{{{ODF_STYLE}}}font-face"):
+                    family = face.get(f"{{{ODF_SVG}}}font-family") or face.get(f"{{{ODF_STYLE}}}name") or ""
+                    fonts.append(family.strip().strip("'\""))
+    return fonts
+
+
 def document_fonts(data: bytes) -> tuple[str, ...]:
-    """Latin fonts a DOCX asks for: its defaults, the styles it uses and its own text."""
+    """Latin fonts a document asks for: for DOCX its defaults, the styles it uses and its own text."""
+    if is_opendocument(data):
+        return _unique(_odt_fonts(data))
     word = f"{{{WORD_NAMESPACE}}}"
     with ZipFile(BytesIO(data)) as package:
         names = {name.casefold(): name for name in package.namelist()}
@@ -159,8 +250,12 @@ def document_fonts(data: bytes) -> tuple[str, ...]:
                 seen.add(identifier)
                 fonts += _fonts_in(styles[identifier], theme)
                 pending += [node.get(f"{word}val", "") for node in styles[identifier].iter(f"{word}basedOn")]
+    return _unique(fonts + direct)
+
+
+def _unique(fonts: list[str]) -> tuple[str, ...]:
     unique: dict[str, str] = {}
-    for font in fonts + direct:
+    for font in fonts:
         font = font.strip()
         if font and len(font) <= 64 and font.isprintable():
             unique.setdefault(font.casefold(), font)
@@ -203,15 +298,18 @@ def find_libreoffice() -> Path | None:
 
 
 def convert_docx_to_pdf(data: bytes, executable: Path | None = None, timeout: float = 60) -> bytes:
-    """Convert without altering the original; temporary data is removed on normal exit."""
-    validate_docx(data)
+    """Convert a Word or LibreOffice Writer document to PDF without altering the original.
+
+    Temporary data is removed on normal exit.
+    """
+    kind = validate_document(data)
     executable = executable or find_libreoffice()
     if executable is None or not executable.is_file():
         raise DocxError("LibreOffice is not installed or configured.")
     try:
         with tempfile.TemporaryDirectory(prefix="sealwharf-docx-") as temp:
             root = Path(temp)
-            source = root / "document.docx"
+            source = root / f"document.{kind}"
             source.write_bytes(data)
             profile = root / "profile"
             profile_user = profile / "user"

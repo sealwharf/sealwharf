@@ -12,6 +12,7 @@ document is gathered into one message per person.
 
 import hashlib
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -114,6 +115,21 @@ class Runtime:
 
 # Outcomes that come with a signed document.
 DELIVERED = frozenset({"signed_by", "partial", "partial_problem"})
+# Outcomes of a document that is still on its way, and remarks that add to another outcome of the same document.
+WAITING = frozenset({"owner_asked", "owner_queued", "progress"})
+REMARKS = frozenset({"fonts_replaced"})
+# How each kind of outcome opens its group in a summary, in the order the groups are shown.
+MARKS = (("✅", DELIVERED | {"approved"}), ("⏳", WAITING), ("⚠️", REMARKS | {"duplicate"}))
+
+
+def _mark(key: str) -> tuple[int, str]:
+    """Where a group goes in the summary and its sign: done first, then waiting, remarks, and what was not signed."""
+    return next(((index, sign) for index, (sign, keys) in enumerate(MARKS) if key in keys), (len(MARKS), "❌"))
+
+
+def _natural(name: str) -> list:
+    """Order file names as people do, so that "2 report" comes before "10 report"."""
+    return [int(part) if part.isdigit() else part.casefold() for part in re.split(r"(\d+)", name)]
 
 
 def _note(inbox: Inbox, recipient: str, key: str, filename: str | None = None, **values: object) -> None:
@@ -139,16 +155,23 @@ def tell_outcomes(inbox: Inbox, client, runtime: Runtime) -> None:
             continue
         notes = inbox.take_notes(recipient)
         language = runtime.language(recipient)
-        if len(notes) == 1:
-            message = _told(language, notes[0][0], notes[0][2])
+        documents = [note for note in notes if note[0] not in REMARKS]
+        if len(documents) <= 1:
+            # One document: its outcome, and any remark about it, each in a sentence of its own.
+            message = "\n".join(_told(language, key, values) for key, _, values in documents + [n for n in notes if n not in documents])
         else:
-            groups: dict[str, list[str]] = {}
+            groups: dict[tuple[int, str, str], list[str]] = {}
             for key, filename, values in notes:
-                groups.setdefault(_told(language, "sum_" + key, values), []).append(_file(runtime, recipient, filename))
-            message = "\n".join([text(language, "summary")] + [f"- {label}: {', '.join(files)}" for label, files in groups.items()])
+                order, sign = _mark(key)
+                groups.setdefault((order, sign, _told(language, "sum_" + key, values)), []).append(_file(runtime, recipient, filename))
+            blocks = [text(language, "summary", count=len(documents))]
+            for (_, sign, label), files in sorted(groups.items(), key=lambda item: item[0][0]):
+                blocks.append(f"{sign} {label} ({len(files)})\n" + "\n".join(f"• {name}" for name in sorted(files, key=_natural)))
+            message = "\n\n".join(blocks)
         # Whoever receives a signed document is asked to look at it, the place of each signature included.
-        if any(key in DELIVERED for key, _, _ in notes):
-            message += "\n" + text(language, "review_reminder")
+        delivered = sum(1 for key, _, _ in notes if key in DELIVERED)
+        if delivered:
+            message += ("\n\n" if len(documents) > 1 else "\n") + text(language, "review_reminder_many" if delivered > 1 else "review_reminder")
         try:
             client.send_text(recipient, message)
         except Exception:
@@ -653,6 +676,7 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
             inbox.set_state(message_id, "duplicate")
             _note(inbox, sender, "duplicate", filename)
             return
+        # A Word or LibreOffice Writer document becomes a PDF first.
         if document.startswith(b"PK\x03\x04"):
             replaced = substituted_fonts(document)
             document = convert_docx_to_pdf(document)

@@ -228,4 +228,5 @@ def test_replaced_fonts_are_mentioned_and_the_document_is_still_signed(tmp_path,
     monkeypatch.setattr("sealwharf.application.worker.sign_pdf", lambda *_: b"signed")
     assert process_one(inbox, client, signer())
     assert sent == [b"signed"] and state(inbox) == "sent"
-    assert len(notes) == 1 and "replaced fonts (Rare Face → DejaVu Sans): Report.docx" in notes[0] and "- Signed: Report.docx" in notes[0]
+    assert len(notes) == 1 and notes[0].startswith("All set! Signed by: Jane Example.\nThe document was converted to PDF.")
+    assert "I replaced the fonts I do not have: Rare Face → DejaVu Sans." in notes[0]
