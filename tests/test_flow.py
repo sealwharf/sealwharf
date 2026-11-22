@@ -870,6 +870,29 @@ def test_ordinary_conversation_is_never_answered(world):
     assert accepted_events(read_messages(payload), frozenset({OWNER_A}))[0].body == "verify"
 
 
+def test_a_photo_and_a_picture_file_are_read_as_documents(world):
+    chat = f"{OWNER_A}@s.whatsapp.net"
+    payload = {"event": {"type": "messages", "event": "post"},
+               "messages": [{"id": "p1", "from_me": False, "type": "image", "chat_id": chat,
+                             "image": {"id": "media-p", "mime_type": "image/jpeg"}},
+                            {"id": "p2", "from_me": False, "type": "document", "chat_id": chat,
+                             "document": {"id": "media-f", "file_name": "scan.jpeg", "mime_type": "image/jpeg"}}]}
+    photo, picture_file = accepted_events(read_messages(payload), frozenset({OWNER_A}))
+    assert (photo.kind, photo.filename, photo.body) == ("document", None, "photo")
+    assert (picture_file.filename, picture_file.body) == ("scan.jpeg", None)
+
+
+def test_a_photo_the_bot_cannot_sign_gets_no_answer_while_a_picture_file_does(world):
+    from PIL import Image
+    buffer = BytesIO()
+    Image.new("RGB", (1200, 1600), "white").save(buffer, "JPEG")
+    message = world.send(OWNER_A, buffer.getvalue(), filename=None, caption="photo")
+    # It may be an ordinary photo: no "Got it", and no answer when nothing can be signed.
+    assert world.state(message) == "needs_review" and world.chat.to(OWNER_A) == [] and not world.chat.notes
+    message = world.send(OWNER_A, buffer.getvalue(), filename="scan.jpeg")
+    assert world.state(message) == "needs_review" and len(world.chat.to(OWNER_A)) == 1
+
+
 def test_key_material_sent_in_chat_is_refused_without_download(world):
     payload = {"event": {"type": "messages", "event": "post"},
                "messages": [{"id": "k1", "from_me": False, "type": "document", "chat_id": f"{OWNER_A}@s.whatsapp.net",

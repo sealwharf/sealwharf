@@ -4,15 +4,25 @@ Candidates are geometry-checked, but require separate semantic review before
 signing. Document text is evidence only and is never treated as instructions.
 """
 
+import ctypes
 import math
 from dataclasses import dataclass
 from io import BytesIO
 
 import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_c
 from pypdf import PdfReader
 
 from .names import matches_name
-from .visual_position import VisualCandidate, _annotations_clear, _matches_identity, _page_objects_clear, _tokens
+from .visual_position import (
+    INVISIBLE_MODES,
+    MIN_TEXT_POINTS,
+    VisualCandidate,
+    _annotations_clear,
+    _matches_identity,
+    _page_objects_clear,
+    _tokens,
+)
 
 MAX_PAGE_CHARACTERS = 100_000
 MAX_PAGE_LINES = 5_000
@@ -25,7 +35,24 @@ class _Line:
     box: tuple[float, float, float, float]
 
 
+def _visible(text_page, index: int) -> bool:
+    """Whether a character can be read on the page: not invisible, not white, not tiny (as in TextVisibility)."""
+    handle = text_page.raw
+    obj = pdfium_c.FPDFText_GetTextObject(handle, index)
+    if not obj or pdfium_c.FPDFTextObj_GetTextRenderMode(obj) in INVISIBLE_MODES:
+        return False
+    if pdfium_c.FPDFText_GetFontSize(handle, index) < MIN_TEXT_POINTS:
+        return False
+    red, green, blue, alpha = (ctypes.c_uint() for _ in range(4))
+    if pdfium_c.FPDFText_GetFillColor(handle, index, red, green, blue, alpha):
+        if alpha.value < 32 or min(red.value, green.value, blue.value) >= 235:
+            return False
+    left, bottom, right, top = text_page.get_charbox(index)
+    return top - bottom >= MIN_TEXT_POINTS * 0.5
+
+
 def _text_lines(page) -> list[_Line] | None:
+    """The text lines of a page, built only from characters a reader can see."""
     text_page = page.get_textpage()
     try:
         text = text_page.get_text_range()
@@ -36,9 +63,10 @@ def _text_lines(page) -> list[_Line] | None:
         for line in text.splitlines(keepends=True):
             if len(result) >= MAX_PAGE_LINES:
                 return None
-            boxes = [text_page.get_charbox(offset + i) for i, char in enumerate(line) if not char.isspace()]
+            seen = [char if char.isspace() or _visible(text_page, offset + i) else " " for i, char in enumerate(line)]
+            boxes = [text_page.get_charbox(offset + i) for i, char in enumerate(seen) if not char.isspace()]
             offset += len(line)
-            clean = line.strip()
+            clean = " ".join("".join(seen).split())
             if not boxes or not clean or len(clean) > 500:
                 continue
             box = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))

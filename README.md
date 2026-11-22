@@ -101,7 +101,7 @@ A minute later the bot is ready. To confirm, send it the words `wake up bot` fro
 
 ## Using it
 
-Send a PDF, Word (`.docx`) or LibreOffice Writer (`.odt`) document to the bot. It answers that it received the file and, a few seconds later, sends back the signed PDF.
+Send a PDF, Word (`.docx`) or LibreOffice Writer (`.odt`) document to the bot. A photo of a document (PNG, JPEG or WebP) is also accepted: it becomes an A4 page and goes through the same steps. A photo has no text to read, so today it is signed only in simple cases, and slowly; a photo the bot cannot sign gets no answer, since it may be an ordinary picture. Reading text from photos is planned. It answers that it received the file and, a few seconds later, sends back the signed PDF.
 
 For the bot to find where to sign, **the document needs each signer's full name, as in the certificate, near an empty place to sign**. The simplest case is a name under a line:
 
@@ -122,7 +122,7 @@ Capital letters and accents do not matter. `José Gonçalves`, `Jose Goncalves` 
 
 | You send | The bot does |
 | --- | --- |
-| A PDF, Word or LibreOffice document | Signs it and sends it back. |
+| A PDF, Word or LibreOffice document, or a photo of a document | Signs it and sends it back. |
 | `1`, `2`, `0`… or a word such as `yes`, `no`, `all` | Takes it as your answer to the question it just asked. |
 | A PDF with the caption `verify` (or `verificar`) | Checks the signatures of that PDF, without signing. |
 | `wake up bot` | Answers with a short, playful line, to show it is working. |

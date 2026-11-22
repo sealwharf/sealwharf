@@ -127,7 +127,8 @@ def accepted_events(messages: list[Incoming], senders: frozenset[str]) -> list[J
             # Key material must never be fetched, stored or processed.
             result.append(Job(message.message_id, "", None, sender, "refused", None, seen))
             continue
-        body = "verify" if asks_verification(message.caption) else None
+        photo = isinstance(mime, str) and mime.casefold().startswith("image/") and filename is None
+        body = "verify" if asks_verification(message.caption) else "photo" if photo else None
         result.append(Job(message.message_id, message.media_id, filename, sender, "document", body, seen))
     return result
 

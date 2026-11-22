@@ -62,6 +62,14 @@ def test_text_and_document_are_read_in_the_neutral_form():
     assert accepted_events([message], frozenset({NUMBER})) == [Job("3EB0ABCDEF", message.media_id, "contract.pdf", NUMBER, "document", "verify")]
 
 
+def test_a_photo_and_a_picture_file_are_documents():
+    url = "http://localhost:3000/api/files/default/3EB0ABCDEF.jpeg"
+    [photo] = gateway(nothing).incoming(document(media={"url": url, "mimetype": "image/jpeg"}))
+    [picture_file] = gateway(nothing).incoming(document(media={"url": url, "mimetype": "image/jpeg", "filename": "scan.jpeg"}))
+    assert (photo.filename, picture_file.filename) == (None, "scan.jpeg")
+    assert [job.body for job in accepted_events([photo, picture_file], frozenset({NUMBER}))] == ["photo", None]
+
+
 @pytest.mark.parametrize("payload", [
     event(fromMe=True),
     event(fromMe=None),
@@ -70,6 +78,7 @@ def test_text_and_document_are_read_in_the_neutral_form():
     event(**{"from": "120363000000000000@newsletter"}),
     event(body=""),
     document(media={"url": None, "mimetype": "image/jpeg"}),
+    document(media={"url": "http://localhost:3000/api/files/default/3EB0ABCDEF.ogg", "mimetype": "audio/ogg"}),
     document(media=None),
     {**event(), "event": "message.ack"},
     {**event(), "session": "another"},

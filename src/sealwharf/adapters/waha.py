@@ -15,7 +15,7 @@ DIRECT = re.compile(r"([0-9]{5,20})@(c\.us|s\.whatsapp\.net|lid)")
 FILE_PATH = re.compile(r"/api/files/[A-Za-z0-9._%@/-]{1,140}")
 MEDIA_PREFIX = "waha."
 NO_MEDIA = MEDIA_PREFIX + "none"  # a file the gateway did not fetch; downloading it fails
-NOT_DOCUMENTS = ("image/", "audio/", "video/")
+NOT_DOCUMENTS = ("audio/", "video/")
 
 
 def _number(chat_id: object) -> str | None:
@@ -77,7 +77,8 @@ class Waha(Gateway):
             return [Incoming(message_id, address, text=body)] if body else []
         media = message.get("media")
         mime = media.get("mimetype") if isinstance(media, dict) else None
-        if not isinstance(mime, str) or mime.casefold().startswith(NOT_DOCUMENTS):
+        picture = isinstance(mime, str) and mime.casefold().startswith("image/")
+        if not isinstance(mime, str) or mime.casefold().startswith(NOT_DOCUMENTS) or (picture and not isinstance(media.get("url"), str)):
             return []
         filename = media.get("filename") if isinstance(media.get("filename"), str) else None
         return [Incoming(message_id, address, None, _media_id(media.get("url")), filename or None, mime, body or None)]

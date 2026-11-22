@@ -140,6 +140,22 @@ def signature_places(document: bytes) -> list[Place]:
     return [replace(place, document=tuple(everything)) for place in places] if any_text else []
 
 
+def visible_lines(document: bytes) -> list[str]:
+    """Every line of text a reader can see in the document; none for a document with no visible text."""
+    reader = PdfReader(BytesIO(document), strict=True)
+    if reader.is_encrypted or len(reader.pages) > MAX_PAGES:
+        return []
+    found: list[str] = []
+    with pdfium.PdfDocument(document) as pdf:
+        for number in range(len(pdf)):
+            page = pdf[number]
+            try:
+                found.extend(line.text for line in _text_lines(page) or [])
+            finally:
+                page.close()
+    return found
+
+
 def free_places_at_end(document: bytes, count: int) -> list[tuple[int, tuple[float, float, float, float]]]:
     """Empty places low on the last page, one per signer, side by side when they fit; none if there is no room."""
     reader = PdfReader(BytesIO(document), strict=True)

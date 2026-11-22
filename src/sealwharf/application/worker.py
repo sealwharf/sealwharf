@@ -27,9 +27,10 @@ from ..adapters.audit import AuditLog, operational_logger
 from ..adapters.inbox import Inbox, Job, PendingSignature, SigningRequestRecord
 from ..adapters.local_ai import suggest_local_ai_position
 from ..authorization import format_number
-from ..documents.candidates import free_places_at_end, place_by_name, signature_places
+from ..documents.candidates import free_places_at_end, place_by_name, signature_places, visible_lines
 from ..documents.contextual_position import suggest_contextual_position
 from ..documents.docx import convert_docx_to_pdf, substituted_fonts
+from ..documents.images import image_to_pdf, is_image
 from ..documents.names import contains_name, matches_name, only_in_running_text
 from ..documents.normalize import normalize_rotation
 from ..documents.position import find_signature_position, has_signature_widgets
@@ -249,7 +250,8 @@ def _locate_signature(document: bytes, signer: UnlockedSigner, contextual_review
 
 
 def _named(document: bytes, name: str) -> bool:
-    return any(contains_name(source, words(name)) for source in _sources(document))
+    """Whether the name is written where a reader can see it: hidden text never stands for a signer."""
+    return any(contains_name(words(line), words(name)) for line in visible_lines(document))
 
 
 def _locate_named(document: bytes, name: str, visual_review: str, contextual_review, general_suggest, choose_place=None):
@@ -652,6 +654,8 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
                      choose_place=None) -> None:
     message_id, media_id, filename, sender = job[:4]
     authorized = tuple(signer for signer in signers if sender in signer.config.allowed_senders)
+    # A photo sent in the conversation, not as a file: answered only when it can be signed or a question is needed.
+    quiet = job.body == "photo"
     if not authorized:
         inbox.set_state(message_id, "needs_review")
         return
@@ -660,8 +664,8 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
             inbox.set_state(message_id, "rate_limited")
             _note(inbox, sender, "rate_limited", filename)
             return
-        # Documents sent together are acknowledged once.
-        if inbox.recent_documents(sender, message_id, hours=1 / 60) == 1:
+        # Documents sent together are acknowledged once. A photo is not: it may be an ordinary one.
+        if not quiet and inbox.recent_documents(sender, message_id, hours=1 / 60) == 1:
             runtime.mention(client, sender, "received")
         document = client.download_document(media_id)
         if job.body == "verify":
@@ -682,6 +686,9 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
             document = convert_docx_to_pdf(document)
             if replaced:
                 _note(inbox, sender, "fonts_replaced", filename, fonts=", ".join(f"{font} → {other}" for font, other in replaced))
+        elif is_image(document):
+            # A picture of a document becomes a page; it has no text, so it is read like a scanned page.
+            document = image_to_pdf(document)
         validate_pdf(document)
         document = normalize_rotation(document)
         referenced = _referenced_signers(document, authorized)
@@ -700,6 +707,8 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
                 _offer_choice(inbox, client, runtime, job, document, at_end, [], at_end=True)
                 return
             inbox.set_state(message_id, "needs_review")
+            if quiet:
+                return
             # Nobody named is told apart from somebody named without a place, so no certificate seems to be meant.
             if referenced:
                 _note(inbox, sender, "no_location", filename, names=", ".join(signer.config.name for signer in referenced))
@@ -714,7 +723,10 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
         else:
             _offer_choice(inbox, client, runtime, job, document, located, unplaced)
     except Exception as exc:
-        _report_failure(inbox, message_id, sender, filename, exc)
+        if quiet:
+            inbox.set_state(message_id, "needs_review")
+        else:
+            _report_failure(inbox, message_id, sender, filename, exc)
 
 
 def _at_end(document: bytes, referenced) -> list:

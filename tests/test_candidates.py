@@ -7,7 +7,7 @@ from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from sealwharf.adapters.local_ai import NothingToChoose, choose_signature_place
-from sealwharf.documents.candidates import describe_places, free_places_at_end, place_by_name, signature_places
+from sealwharf.documents.candidates import describe_places, free_places_at_end, place_by_name, signature_places, visible_lines
 
 
 def page(*texts, lines=b"", boxes=b""):
@@ -128,3 +128,12 @@ def test_room_at_the_end_of_the_last_page_avoids_what_is_written_there():
     spots = free_places_at_end(crowded, 2)
     assert len(spots) == 2 and all(spot[0] == 0 for spot in spots)
     assert all(box[1] > 95 or box[0] > 300 for _, box in spots)
+
+
+@pytest.mark.parametrize("hidden", [b"3 Tr", b"1 1 1 rg", b"tiny"])
+def test_a_hidden_name_claims_no_place_and_names_nobody(hidden):
+    # The attack of the evaluation: the signer's name drawn invisible, white or minute under a line.
+    size, style = (b"0.5", b"") if hidden == b"tiny" else (b"11", hidden)
+    document = page(lines=b"100 300 m 280 300 l S BT " + style + b" /F1 " + size + b" Tf 110 285 Td (Jane Example) Tj ET ")
+    assert place_by_name(signature_places(document), "Jane Example") is None
+    assert not any("Jane" in line for line in visible_lines(document))

@@ -40,8 +40,10 @@ def read_messages(payload: object) -> list[Incoming]:
             if isinstance(body, str):
                 result.append(Incoming(message_id, address, text=body))
             continue
-        document = message.get("document")
-        if message.get("type") != "document" or not isinstance(document, dict) or not isinstance(document.get("id"), str):
+        # A file, or a photo sent in the conversation; a photo has no file name.
+        kind = message.get("type")
+        document = message.get(kind) if kind in ("document", "image") else None
+        if not isinstance(document, dict) or not isinstance(document.get("id"), str):
             continue
 
         def text_of(*keys: str, document=document) -> str | None:
