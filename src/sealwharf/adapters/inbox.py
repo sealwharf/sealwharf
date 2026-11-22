@@ -153,9 +153,10 @@ class Inbox:
             db.execute("CREATE TABLE IF NOT EXISTS addresses (number TEXT PRIMARY KEY, address TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, recipient TEXT NOT NULL, "
                        "key TEXT NOT NULL, filename TEXT, data TEXT NOT NULL)")
-            for table, column in (("jobs", "digest"), ("requests", "question")):
+            for table, column, kind in (("jobs", "digest", "TEXT"), ("requests", "question", "TEXT"),
+                                        ("request_signers", "asked_after", "INTEGER")):
                 if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
-                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
 
     def connect(self):
         connection = sqlite3.connect(self.path, timeout=10)
@@ -280,7 +281,8 @@ class Inbox:
             db.execute("BEGIN IMMEDIATE")
             db.execute("INSERT INTO requests (request_id, message_id, requester, filename, original_sha256, original_size, "
                        "question, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (*record, time.time()))
-            db.executemany("INSERT INTO request_signers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            db.executemany("INSERT INTO request_signers (request_id, signer_id, page, x1, y1, x2, y2, field_name, status, owner, "
+                           "expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                            [(s.request_id, s.signer_id, s.page, *s.box, s.field_name, s.status, s.owner, s.expires_at)
                             for s in signatures])
 
@@ -302,7 +304,7 @@ class Inbox:
     def pending_for_owner(self, owner: str) -> list[PendingSignature]:
         return self._signatures("owner=? AND status='pending'", (owner,))
 
-    def open_question(self, number: str, now: float) -> tuple[str, list[str]] | None:
+    def open_question(self, number: str, now: float, answer: str | None = None) -> tuple[str, list[str]] | None:
         """Return the one question this number was asked and has not answered yet.
 
         The result is ("choice", requests) when the number is a requester asked
@@ -310,13 +312,22 @@ class Inbox:
         approve. One question may cover several documents, oldest first, and a
         short reply such as "1" always answers that one question. Questions
         still waiting in line have not been asked and are never returned.
+
+        With `answer`, the message that replies, a question asked only after
+        that message arrived is left out: a reply written before a question was
+        shown never answers it.
         """
+        received = ""
+        values: tuple = (now, number, number)
+        if answer is not None:
+            received = " AND (s.asked_after IS NULL OR s.asked_after < (SELECT rowid FROM jobs WHERE message_id=?))"
+            values += (answer,)
         with self.connect() as db:
             rows = db.execute(
                 "SELECT DISTINCT s.status, r.request_id, r.created_at, r.rowid FROM requests r "
                 "JOIN request_signers s ON s.request_id = r.request_id "
-                "WHERE s.expires_at > ? AND ((s.status='offered' AND r.requester=?) OR (s.status='pending' AND s.owner=?)) "
-                "ORDER BY r.created_at, r.rowid", (now, number, number)).fetchall()
+                "WHERE s.expires_at > ? AND ((s.status='offered' AND r.requester=?) OR (s.status='pending' AND s.owner=?))"
+                + received + " ORDER BY r.created_at, r.rowid", values).fetchall()
         if not rows:
             return None
         status = rows[-1][0]
@@ -333,14 +344,15 @@ class Inbox:
         return [(row[0], _question_kind(row[1]), row[2], row[3], row[4]) for row in rows]
 
     def ask(self, request_id: str, kind: str, number: str, expires_at: float) -> None:
-        """Start the clock of a question at the moment it is asked."""
+        """Start the clock of a question at the moment it is asked, and note the last message received by then."""
+        last = "(SELECT COALESCE(MAX(rowid), 0) FROM jobs)"
         with self.connect() as db:
             if kind == "choice":
-                db.execute("UPDATE request_signers SET expires_at=? WHERE request_id=? AND status='offered' AND expires_at IS NULL",
-                           (expires_at, request_id))
+                db.execute(f"UPDATE request_signers SET expires_at=?, asked_after={last} WHERE request_id=? AND status='offered' "
+                           "AND expires_at IS NULL", (expires_at, request_id))
             else:
-                db.execute("UPDATE request_signers SET expires_at=? WHERE request_id=? AND status='pending' AND owner=? "
-                           "AND expires_at IS NULL", (expires_at, request_id, number))
+                db.execute(f"UPDATE request_signers SET expires_at=?, asked_after={last} WHERE request_id=? AND status='pending' "
+                           "AND owner=? AND expires_at IS NULL", (expires_at, request_id, number))
 
     def requests_waiting_for(self, owner: str) -> int:
         """How many documents wait for this owner's approval, asked or still in line."""

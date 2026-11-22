@@ -639,7 +639,8 @@ def _handle_command(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], r
         client.send_text(job.sender, log_report(runtime.audit, signers, job.sender, runtime.language(job.sender), runtime.called,
                                                 min(int(answer), runtime.log_days * 24), zone=runtime.zone))
     elif action == "answer":
-        question = inbox.open_question(job.sender, time.time())
+        # A reply counts only for a question that was on the person's screen before the reply was sent.
+        question = inbox.open_question(job.sender, time.time(), answer=job.message_id)
         # With no open question, a stray "1" or "yes" belongs to an ordinary conversation: stay silent.
         if question is None:
             pass
