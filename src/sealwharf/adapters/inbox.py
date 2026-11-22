@@ -133,6 +133,9 @@ def accepted_events(messages: list[Incoming], senders: frozenset[str]) -> list[J
     return result
 
 
+# How many times a document may stop the worker before it is given up.
+MAX_ATTEMPTS = 5
+
 class Inbox:
     def __init__(self, path: Path):
         self.path = path
@@ -154,7 +157,7 @@ class Inbox:
             db.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, recipient TEXT NOT NULL, "
                        "key TEXT NOT NULL, filename TEXT, data TEXT NOT NULL)")
             for table, column, kind in (("jobs", "digest", "TEXT"), ("requests", "question", "TEXT"),
-                                        ("request_signers", "asked_after", "INTEGER")):
+                                        ("request_signers", "asked_after", "INTEGER"), ("jobs", "attempts", "INTEGER")):
                 if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
 
@@ -187,7 +190,7 @@ class Inbox:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT message_id, media_id, filename, sender, kind, body FROM jobs WHERE state='pending' ORDER BY created_at, rowid LIMIT 1").fetchone()
             if row:
-                db.execute("UPDATE jobs SET state='processing' WHERE message_id=?", (row[0],))
+                db.execute("UPDATE jobs SET state='processing', attempts=COALESCE(attempts, 0) + 1 WHERE message_id=?", (row[0],))
             return Job(*row) if row else None
 
     def get_state(self, message_id: str) -> str | None:
@@ -255,6 +258,13 @@ class Inbox:
             raise RuntimeError("The exclusive worker lock for this inbox is required.")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            # A document that stopped the worker this many times is given up, and whoever sent it is told.
+            given_up = db.execute("SELECT message_id, sender, filename FROM jobs WHERE state='processing' AND kind='document' "
+                                  "AND COALESCE(attempts, 0) >= ?", (MAX_ATTEMPTS,)).fetchall()
+            for message_id, sender, filename in given_up:
+                db.execute("UPDATE jobs SET state='failed' WHERE message_id=?", (message_id,))
+                db.execute("INSERT INTO notes (recipient, key, filename, data) VALUES (?, 'processing_failed', ?, '{}')",
+                           (sender, filename))
             requeued = db.execute("UPDATE jobs SET state='pending' WHERE state='processing'").rowcount
             uncertain = db.execute("UPDATE jobs SET state='uncertain' WHERE state IN ('sending', 'review_sending', 'failure_sending')").rowcount
         return requeued, uncertain

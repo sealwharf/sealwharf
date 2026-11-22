@@ -484,6 +484,7 @@ To get exactly the same result as on your computer, do one of these:
   | `max_file_mb` | 20 | Largest document accepted, in megabytes |
   | `max_pages` | 200 | Most pages a document may have |
   | `conversion_seconds` | 60 | Longest a Word or LibreOffice conversion may take |
+  | `reading_seconds` | 120 | Longest the reading of one document may take, AI model answers left out |
   | `model_seconds` | 300 | Longest the AI model may take to answer; raise it on a slow computer |
   | `expiry_warning_days` | 30 | How early an owner hears that a certificate is about to expire |
   | `log_lines` | 30 | Most signatures listed by `bot log` |

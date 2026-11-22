@@ -13,7 +13,10 @@ document is gathered into one message per person.
 import hashlib
 import os
 import re
+import signal
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from io import BytesIO
@@ -23,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 from pypdf import PdfReader
 
+from .. import limits
 from ..adapters.audit import AuditLog, operational_logger
 from ..adapters.inbox import Inbox, Job, PendingSignature, SigningRequestRecord
 from ..adapters.local_ai import suggest_local_ai_position
@@ -249,6 +253,41 @@ def _locate_signature(document: bytes, signer: UnlockedSigner, contextual_review
     return next(iter(found.values())) if len(found) == 1 else None
 
 
+class ReadingTimeout(Exception):
+    """Reading a document took longer than limits.reading_seconds."""
+
+
+@contextmanager
+def _reading_limit(seconds: float):
+    """Stop reading a document after this long. Needs POSIX signals and the main thread; elsewhere it does nothing."""
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def stop(*_):
+        raise ReadingTimeout("Reading the document took too long.")
+    previous = signal.signal(signal.SIGALRM, stop)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+@contextmanager
+def _paused():
+    """Leave the AI model out of the reading time: each of its answers has a limit of its own."""
+    remaining = signal.getitimer(signal.ITIMER_REAL)[0] if hasattr(signal, "getitimer") else 0
+    if remaining:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+    try:
+        yield
+    finally:
+        if remaining:
+            signal.setitimer(signal.ITIMER_REAL, remaining)
+
+
 def _named(document: bytes, name: str) -> bool:
     """Whether the name is written where a reader can see it: hidden text never stands for a signer."""
     return any(contains_name(words(line), words(name)) for line in visible_lines(document))
@@ -259,7 +298,8 @@ def _locate_named(document: bytes, name: str, visual_review: str, contextual_rev
     if position is not None or has_signature_widgets(document):
         return position
     if visual_review == "ollama":
-        candidate = suggest_local_ai_position(document, name)
+        with _paused():
+            candidate = suggest_local_ai_position(document, name)
         candidates = [candidate] if candidate is not None else []
     elif visual_review == "deterministic":
         candidates = suggest_visual_positions(document, signer_name=name)
@@ -278,7 +318,8 @@ def _locate_named(document: bytes, name: str, visual_review: str, contextual_rev
         if by_name is not None:
             return SignaturePosition(by_name.page, by_name.box)
         if choose_place is not None:
-            verdict, place = choose_place(document, name)
+            with _paused():
+                verdict, place = choose_place(document, name)
             if verdict == "chosen":
                 return SignaturePosition(place.page, place.box)
             if verdict == "none":
@@ -286,10 +327,13 @@ def _locate_named(document: bytes, name: str, visual_review: str, contextual_rev
     contextual = None
     if contextual_review is not None:
         contextual = suggest_contextual_position(document, name)
-        if contextual is not None and contextual_review(document, name, contextual) == contextual:
+        with _paused():
+            reviewed = contextual is not None and contextual_review(document, name, contextual) == contextual
+        if reviewed:
             return SignaturePosition(contextual.page, contextual.box)
     if contextual is None and general_suggest is not None:
-        candidate = general_suggest(document, name)
+        with _paused():
+            candidate = general_suggest(document, name)
         if candidate is not None:
             return SignaturePosition(candidate.page, candidate.box)
     return None
@@ -690,20 +734,26 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
         elif is_image(document):
             # A picture of a document becomes a page; it has no text, so it is read like a scanned page.
             document = image_to_pdf(document)
-        validate_pdf(document)
-        document = normalize_rotation(document)
-        referenced = _referenced_signers(document, authorized)
-        if _has_unresolved_name_variant(document, referenced, authorized):
-            referenced = ()
-        located = [(signer, position) for signer in referenced
-                   if (position := _locate_signature(document, signer, contextual_review, general_suggest, choose_place)) is not None]
-        # Two people given the same place: neither is placed, so neither is signed there.
-        clashing = {signer.config.id for signer, position in located
-                    for other, place in located if other is not signer and overlapping([position, place])}
-        located = [(signer, position) for signer, position in located if signer.config.id not in clashing]
-        if not located:
+        # Reading the document has a time limit: a file built to be slow to read must not hold the worker.
+        with _reading_limit(limits.current.reading_seconds):
+            validate_pdf(document)
+            document = normalize_rotation(document)
+            referenced = _referenced_signers(document, authorized)
+            if _has_unresolved_name_variant(document, referenced, authorized):
+                referenced = ()
+            located = [(signer, position) for signer in referenced
+                       if (position := _locate_signature(document, signer, contextual_review, general_suggest, choose_place))
+                       is not None]
+            # Two people given the same place: neither is placed, so neither is signed there.
+            clashing = {signer.config.id for signer, position in located
+                        for other, place in located if other is not signer and overlapping([position, place])}
+            located = [(signer, position) for signer, position in located if signer.config.id not in clashing]
             # Somebody named in the document, but with no clear place: offer to sign at the end of the last page.
-            at_end = _at_end(document, referenced)
+            at_end = _at_end(document, referenced) if not located else []
+            # Somebody named only inside a sentence, with no place to sign, is the subject of the document, not a signer.
+            unplaced = [signer for signer in referenced
+                        if all(signer is not placed for placed, _ in located) and not _only_mentioned(document, signer)] if located else []
+        if not located:
             if at_end:
                 _offer_choice(inbox, client, runtime, job, document, at_end, [], at_end=True)
                 return
@@ -716,9 +766,6 @@ def _handle_document(inbox: Inbox, client, signers, contextual_review, general_s
             else:
                 _note(inbox, sender, "no_signer", filename)
             return
-        # Somebody named only inside a sentence, with no place to sign, is the subject of the document, not a signer.
-        unplaced = [signer for signer in referenced
-                    if all(signer is not placed for placed, _ in located) and not _only_mentioned(document, signer)]
         if len(located) == 1 and not unplaced and not located[0][0].config.needs_confirmation(sender):
             _proceed(inbox, client, signers, runtime, job, document, located)
         else:

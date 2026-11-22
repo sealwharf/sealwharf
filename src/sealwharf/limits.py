@@ -19,6 +19,7 @@ class Limits:
     max_file_mb: int = 20            # largest document accepted, in megabytes
     max_pages: int = 200             # most pages a document may have
     conversion_seconds: int = 60     # longest a Word or LibreOffice conversion may take
+    reading_seconds: int = 120       # longest the reading of one document may take, AI model answers left out
     model_seconds: int = 300         # longest the AI model may take to answer
     expiry_warning_days: int = 30    # how early an owner hears that a certificate is about to expire
     log_lines: int = 30              # most signatures listed by bot log
@@ -31,7 +32,8 @@ class Limits:
 RANGES = {
     "requests_per_hour": (1, 10000), "confirmation_minutes": (1, 1440), "log_days": (1, 3650),
     "waiting_per_owner": (1, 1000), "batch_seconds": (0, 120), "max_file_mb": (1, 200), "max_pages": (1, 5000),
-    "conversion_seconds": (10, 1800), "model_seconds": (10, 3600), "expiry_warning_days": (1, 365), "log_lines": (1, 500),
+    "conversion_seconds": (10, 1800), "reading_seconds": (5, 3600), "model_seconds": (10, 3600),
+    "expiry_warning_days": (1, 365), "log_lines": (1, 500),
 }
 NAMES = tuple(item.name for item in fields(Limits))
 

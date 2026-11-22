@@ -65,6 +65,7 @@ limits:
   max_file_mb: 20                   # largest document accepted, in megabytes
   max_pages: 200                    # most pages a document may have
   conversion_seconds: 60            # longest a Word or LibreOffice conversion may take
+  reading_seconds: 120              # longest the reading of one document may take, AI model answers left out
   model_seconds: 300                # longest the AI model may take to answer (raise it on slow computers)
   expiry_warning_days: 30           # how early an owner hears that a certificate is about to expire
   log_lines: 30                     # most signatures listed by bot log

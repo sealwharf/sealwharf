@@ -9,7 +9,8 @@ import zipfile
 import pytest
 from test_flow import OWNER_A, PREPARER, make_pdf, world  # noqa: F401  (world is a fixture)
 
-from sealwharf.adapters.inbox import Job, parse_command
+from sealwharf.adapters.inbox import Inbox, Job, parse_command
+from sealwharf.adapters.locking import worker_lock_path
 from sealwharf.application.worker import process_one
 from sealwharf.documents.docx import DocxError, validate_document
 
@@ -103,3 +104,36 @@ OUTSIDE_CONTENT = {
 def test_a_document_that_pulls_content_from_outside_itself_is_refused(case):
     with pytest.raises(DocxError):
         validate_document(OUTSIDE_CONTENT[case]())
+
+
+# Availability.
+
+class _HeldLock:
+    """Stands for the worker lock, which needs POSIX, so the test also runs on Windows."""
+    held = True
+
+    def __init__(self, database):
+        self.path = worker_lock_path(database)
+
+
+def test_a_document_that_keeps_stopping_the_worker_is_given_up(tmp_path):
+    """A file that crashes or hangs the worker must not be handed back to it on every restart, for ever."""
+    inbox = Inbox(tmp_path / "inbox.db")
+    inbox.add([Job("m1", "media1", "poison.pdf", OWNER_A)])
+    for _ in range(5):
+        assert inbox.claim() is not None       # the worker takes the document and dies while reading it
+        inbox.recover_interrupted(_HeldLock(inbox.path))  # the container restarts
+    assert inbox.claim() is None
+
+
+@pytest.mark.skipif(not hasattr(__import__("signal"), "setitimer"), reason="The reading time limit needs POSIX signals")
+def test_a_document_that_is_slow_to_read_is_stopped_at_the_reading_limit(world, monkeypatch):  # noqa: F811
+    import time
+
+    from sealwharf import limits
+    monkeypatch.setattr(limits, "current", limits.parse({"reading_seconds": 5}))
+    monkeypatch.setattr("sealwharf.application.worker._referenced_signers", lambda *_: time.sleep(30))
+    started = time.time()
+    message = world.send(OWNER_A, make_pdf("Alice Example"))
+    assert world.state(message) == "failed" and time.time() - started < 20
+    assert "could not process" in world.chat.to(OWNER_A)[-1]
