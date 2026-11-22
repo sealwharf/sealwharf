@@ -40,6 +40,10 @@ ODT_MIMETYPE = b"application/vnd.oasis.opendocument.text"
 ODF_XLINK = "http://www.w3.org/1999/xlink"
 ODF_STYLE = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
 ODF_SVG = "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
+XFORMS_NAMESPACE = "http://www.w3.org/2002/xforms"
+# Documents of their own inside a package: LibreOffice merges them without the checks the outer file gets.
+INNER_DOCUMENTS = (".docx", ".docm", ".dotx", ".dotm", ".doc", ".odt", ".ott", ".fodt", ".rtf", ".htm", ".html",
+                   ".mht", ".mhtml", ".xhtml")
 # Elements that run code, embed other programs or pull content from elsewhere when a document is opened.
 ODT_UNSAFE = frozenset({"scripts", "script", "event-listener", "event-listeners", "dde-connection-decl",
                         "dde-connection-decls", "dde-connection", "section-source", "object", "object-ole", "applet",
@@ -86,9 +90,33 @@ def _check_entries(package: ZipFile, kind: str) -> set[str]:
             raise DocxError(f"Unsupported {kind} package entry.")
         names.add(lower)
         if ("vbaproject" in lower or "vbadat" in lower or "/activex/" in lower or "/embeddings/" in lower
-                or lower.endswith(".exe") or lower.startswith(("basic/", "scripts/")) or lower.startswith("object ")):
+                or lower.endswith(".exe") or lower.startswith(("basic/", "scripts/")) or lower.startswith("object ")
+                or lower.endswith(INNER_DOCUMENTS)):
             raise DocxError("Embedded active content is not supported.")
     return names
+
+
+def _inside(target: str, base: str, names: set[str]) -> bool:
+    """Whether a reference stays inside the package: a "#anchor", or a part of the package that exists.
+
+    Absolute paths, parent folders that leave the package and addresses with a scheme all point elsewhere.
+    """
+    if target.startswith("#"):
+        return True
+    if not target or target.startswith(("/", "\\")) or re.match(r"(?i)^[a-z][a-z0-9+.-]*:|^//", target):
+        return False
+    parts: list[str] = [part for part in base.split("/") if part]
+    for part in target.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not parts:
+                return False
+            parts.pop()
+        else:
+            parts.append(part)
+    joined = "/".join(parts).casefold()
+    return joined in names or any(name.startswith(joined + "/") for name in names)
 
 
 def validate_odt(data: bytes) -> None:
@@ -104,13 +132,21 @@ def validate_odt(data: bytes) -> None:
                 if not item.filename.casefold().endswith(".xml"):
                     continue
                 root = _parse_xml(package.read(item))
+                base = item.filename.rsplit("/", 1)[0] if "/" in item.filename else ""
                 for node in root.iter():
-                    local = node.tag.rsplit("}", 1)[-1]
+                    namespace, _, local = node.tag.rpartition("}")
                     # LibreOffice always writes an empty list of scripts; only one with something in it is refused.
                     if local in ODT_UNSAFE and not (local in {"scripts", "event-listeners"} and len(node) == 0):
                         raise DocxError("Scripts, embedded objects and linked content are not supported.")
-                    target = node.get(f"{{{ODF_XLINK}}}href", "")
-                    if re.match(r"(?i)^[a-z][a-z0-9+.-]*:|^//|^\.\./", target):
+                    # A form model loads its data from an address of its own choosing.
+                    if namespace == "{" + XFORMS_NAMESPACE:
+                        raise DocxError("Form models are not supported.")
+                    target = node.get(f"{{{ODF_XLINK}}}href")
+                    if target is None:
+                        continue
+                    # A link in the text is only shown; anything else must be a part of this package.
+                    hyperlink = local == "a" and re.match(r"(?i)^(https?|mailto):", target)
+                    if not hyperlink and not _inside(target, base, names):
                         raise DocxError("Links to outside content are not supported.")
     except DocxError:
         raise
@@ -164,16 +200,22 @@ def validate_docx(data: bytes) -> None:
                 lower = item.filename.casefold()
                 if lower.endswith(".rels"):
                     root = _parse_xml(package.read(item))
-                    if any(rel.get("TargetMode", "").casefold() == "external"
-                           or re.match(r"(?i)^[a-z][a-z0-9+.-]*:|^//", rel.get("Target", ""))
-                           for rel in root.findall(f"{{{RELATIONSHIPS_NAMESPACE}}}Relationship")):
-                        raise DocxError("External DOCX relationships are not supported.")
+                    # A relationship of "word/_rels/document.xml.rels" is relative to "word/".
+                    folder = item.filename.rsplit("_rels/", 1)[0].rstrip("/")
+                    for rel in root.findall(f"{{{RELATIONSHIPS_NAMESPACE}}}Relationship"):
+                        target = rel.get("Target", "")
+                        if (rel.get("TargetMode", "").casefold() == "external"
+                                or rel.get("Type", "").casefold().endswith("/afchunk")
+                                or not _inside(target.lstrip("/"), "" if target.startswith("/") else folder, names)):
+                            raise DocxError("External DOCX relationships are not supported.")
                 elif lower.startswith("word/") and lower.endswith(".xml"):
                     root = _parse_xml(package.read(item))
                     field_parts = [node.text or "" for node in root.iter(f"{{{WORD_NAMESPACE}}}instrText")]
                     field_parts += [node.get(f"{{{WORD_NAMESPACE}}}instr", "")
                                     for node in root.iter(f"{{{WORD_NAMESPACE}}}fldSimple")]
                     field_text = " ".join(field_parts) + " " + "".join(field_parts)
+                    if any(True for _ in root.iter(f"{{{WORD_NAMESPACE}}}altChunk")):
+                        raise DocxError("Documents merged into a DOCX are not supported.")
                     if UNSAFE_FIELD.search(field_text):
                         raise DocxError("External document fields are not supported.")
     except DocxError:
