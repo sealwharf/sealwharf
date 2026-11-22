@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .. import limits
 from ..adapters.audit import operational_logger
 from ..adapters.inbox import Inbox
 from ..documents.names import holds_name, name_words
@@ -17,8 +18,6 @@ from ..documents.signing import (
 )
 from ..messages import DEFAULT_LANGUAGE, text
 from ..signer_config import SignerConfig
-
-EXPIRY_WARNING_DAYS = 30
 
 
 @dataclass(frozen=True)
@@ -101,7 +100,7 @@ def status_report(inbox: Inbox, signers: tuple[UnlockedSigner, ...], language: s
         expires = signer.expires_at
         days = (expires - moment).days if expires is not None else 0
         key = ("status_no_date" if expires is None else "status_expired" if expires <= moment
-               else "status_expiring" if days <= EXPIRY_WARNING_DAYS else "status_certificate")
+               else "status_expiring" if days <= limits.current.expiry_warning_days else "status_certificate")
         lines.append(text(language, key, position=position, name=signer.config.name, days=days,
                           kind=text(language, "status_token" if signer.config.token_module is not None else "status_file"),
                           date=expires.date().isoformat() if expires is not None else ""))
@@ -119,7 +118,7 @@ def warn_expiring(inbox: Inbox, client, signers: tuple[UnlockedSigner, ...], lan
             continue
         days = (signer.expires_at - moment).days
         mark = f"expiry:{signer.config.id}:{moment.date().isoformat()}"
-        if days > EXPIRY_WARNING_DAYS or inbox.get_mark(mark) is not None:
+        if days > limits.current.expiry_warning_days or inbox.get_mark(mark) is not None:
             continue
         try:
             client.send_text(owner, text((languages or {}).get(owner, DEFAULT_LANGUAGE), "expiry_warning",

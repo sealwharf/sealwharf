@@ -4,8 +4,7 @@ from io import BytesIO
 
 from pypdf import PdfReader
 
-MAX_PDF_BYTES = 20 * 1024 * 1024
-MAX_PAGES = 200
+from .. import limits
 
 
 class DocumentError(Exception):
@@ -13,11 +12,11 @@ class DocumentError(Exception):
 
 
 def validate_pdf(data: bytes) -> None:
-    if not data.startswith(b"%PDF-") or len(data) > MAX_PDF_BYTES:
+    if not data.startswith(b"%PDF-") or len(data) > limits.current.max_file_bytes:
         raise DocumentError("The file is not a valid PDF or exceeds the size limit.")
     try:
         reader = PdfReader(BytesIO(data), strict=True)
-        if reader.is_encrypted or not 1 <= len(reader.pages) <= MAX_PAGES:
+        if reader.is_encrypted or not 1 <= len(reader.pages) <= limits.current.max_pages:
             raise DocumentError("The PDF is encrypted, empty, or has too many pages.")
     except DocumentError:
         raise

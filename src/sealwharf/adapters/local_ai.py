@@ -18,6 +18,7 @@ from PIL import ImageDraw
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
+from .. import limits
 from ..documents.candidates import Place, contradicts, describe_places, holds_name, place_by_name, signature_places
 from ..documents.contextual_position import suggest_contextual_position
 from ..documents.names import contains_name
@@ -46,10 +47,9 @@ MAX_RESPONSE_BYTES = 65536
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_PAGE_POINTS = 5000
 # On a processor without a suitable GPU the model reads about 500 image tokens every 40 seconds, so the
-# pictures are kept just large enough to read a name, and an answer may take a few minutes.
+# pictures are kept just large enough to read a name; limits.model_seconds bounds each answer.
 PAGE_PIXELS = 1000.0
 REVIEW_PIXELS = 1200.0
-MODEL_SECONDS = 300
 SCHEMA = {
     "type": "object", "additionalProperties": False,
     "properties": {"signature_area": {"type": "boolean"}, "visible_name": {"type": "string"}},
@@ -69,7 +69,7 @@ def _ask_model(picture: bytes, prompt: str, schema: dict, transport=None):
                "messages": [{"role": "user", "content": prompt + " /no_think",
                              "images": [base64.b64encode(picture).decode("ascii")]},
                             {"role": "assistant", "content": "<think>\n\n</think>\n\n"}]}
-    with httpx.Client(timeout=httpx.Timeout(MODEL_SECONDS, connect=5), follow_redirects=False,
+    with httpx.Client(timeout=httpx.Timeout(limits.current.model_seconds, connect=5), follow_redirects=False,
                       trust_env=False, transport=transport) as client:
         with client.stream("POST", OLLAMA_ENDPOINT, json=request) as response:
             response.raise_for_status()
@@ -89,9 +89,6 @@ def _ask_model(picture: bytes, prompt: str, schema: dict, transport=None):
 
 class NothingToChoose(Exception):
     """The document offers no marked place to choose from, as a scanned page does."""
-
-
-CHOICE_SECONDS = 120
 
 
 def choose_signature_place(document: bytes, signer_name: str, *, transport=None) -> Place | None:
@@ -125,7 +122,7 @@ def choose_signature_place(document: bytes, signer_name: str, *, transport=None)
                "options": {"temperature": 0, "num_predict": 20},
                "messages": [{"role": "user", "content": prompt},
                             {"role": "assistant", "content": "<think>\n\n</think>\n\n"}]}
-    with httpx.Client(timeout=httpx.Timeout(CHOICE_SECONDS, connect=5), follow_redirects=False,
+    with httpx.Client(timeout=httpx.Timeout(limits.current.model_seconds, connect=5), follow_redirects=False,
                       trust_env=False, transport=transport) as client:
         response = client.post(OLLAMA_ENDPOINT, json=request)
         response.raise_for_status()
@@ -358,7 +355,7 @@ def _review_candidate(document: bytes, signer_name: str, candidate: VisualCandid
                    "messages": [{"role": "user", "content": prompt,
                                  "images": [base64.b64encode(picture).decode("ascii")]},
                                 {"role": "assistant", "content": "<think>\n\n</think>\n\n"}]}
-        with httpx.Client(timeout=httpx.Timeout(MODEL_SECONDS, connect=5), follow_redirects=False,
+        with httpx.Client(timeout=httpx.Timeout(limits.current.model_seconds, connect=5), follow_redirects=False,
                           trust_env=False, transport=transport) as client:
             with client.stream("POST", OLLAMA_ENDPOINT, json=request) as response:
                 response.raise_for_status()

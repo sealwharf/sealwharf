@@ -18,7 +18,8 @@ from typing import NamedTuple
 
 import httpx
 
-from ..documents.validation import MAX_PDF_BYTES, DocumentError, validate_pdf
+from .. import limits
+from ..documents.validation import DocumentError, validate_pdf
 
 HEADER = "X-Sealwharf-Secret"  # carries the webhook secret on every call from the gateway
 NUMBER = re.compile(r"[0-9]{9,15}")
@@ -122,7 +123,7 @@ class Gateway:
         result = bytearray()
         for chunk in self._media_chunks(media_id):
             result.extend(chunk)
-            if len(result) > MAX_PDF_BYTES:
+            if len(result) > limits.current.max_file_bytes:
                 raise DocumentError("Document exceeds the size limit.")
         data = bytes(result)
         if not data.startswith((b"%PDF-", b"PK\x03\x04")):

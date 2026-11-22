@@ -39,7 +39,8 @@ command a reader needs.
   `purge.py`, `logs.py`, `__main__.py`: container entry points (`run`,
   `check`, `token-driver`, `token-check`, `token-retry`, `healthcheck`,
   `purge`, `log`).
-- `src/sealwharf/signer_config.py`: the single YAML configuration, secrets included.
+- `src/sealwharf/signer_config.py`: the single YAML configuration, secrets included;
+  `limits.py` holds the limits each installation chooses under `limits`.
 - `src/sealwharf/locales/*.toml`: one catalog per language (`en` is the
   reference, plus `pt-br` and `es`) with every chat message, the wake replies
   and the phrases people may write. `src/sealwharf/messages.py` loads and

@@ -55,7 +55,16 @@ certificates:
     owner: jane
     preparers: [john]
 
+# Every limit is optional; the values below are the defaults. Change only what suits how you use the bot.
 limits:
-  requests_per_hour: 20             # documents accepted from each number
+  requests_per_hour: 20             # documents accepted from each number in an hour
   confirmation_minutes: 5           # how long a question stays open for an answer
   log_days: 90                      # how long the record of signatures is kept
+  waiting_per_owner: 20             # documents that may wait in line for one owner's approval
+  batch_seconds: 5                  # pause after a document, so the ones sent with it get one answer
+  max_file_mb: 20                   # largest document accepted, in megabytes
+  max_pages: 200                    # most pages a document may have
+  conversion_seconds: 60            # longest a Word or LibreOffice conversion may take
+  model_seconds: 300                # longest the AI model may take to answer (raise it on slow computers)
+  expiry_warning_days: 30           # how early an owner hears that a certificate is about to expire
+  log_lines: 30                     # most signatures listed by bot log

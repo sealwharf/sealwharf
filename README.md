@@ -472,7 +472,23 @@ To get exactly the same result as on your computer, do one of these:
 - **Record of signatures.** Every signature is recorded with the time, the name of the file, who asked, who approved and the fingerprint of the document. The section "Logs" below tells who may read it and for how long it is kept.
 - **Logs.** `docker compose logs sealwharf` shows what the bot is doing, without phone numbers, names or file names.
 - **Expiring certificates.** From 30 days before a certificate expires, its owner gets a daily reminder.
-- **Limits.** Each number may send 20 documents per hour, and a question stays open for 5 minutes. Both can be changed under `limits` in the configuration. For someone who sends documents in bulk, add `limit: 200` (documents per hour) to that person in `contacts`.
+- **Limits.** Every limit is yours to choose, under `limits` in the configuration; leave out the ones you are happy with. `config/sealwharf.example.yaml` lists them all with their defaults:
+
+  | Limit | Default | What it controls |
+  | --- | --- | --- |
+  | `requests_per_hour` | 20 | Documents accepted from each number in an hour |
+  | `confirmation_minutes` | 5 | How long a question stays open for an answer |
+  | `log_days` | 90 | How long the record of signatures is kept |
+  | `waiting_per_owner` | 20 | Documents that may wait in line for one owner's approval |
+  | `batch_seconds` | 5 | Pause after a document, so the ones sent with it get one answer |
+  | `max_file_mb` | 20 | Largest document accepted, in megabytes |
+  | `max_pages` | 200 | Most pages a document may have |
+  | `conversion_seconds` | 60 | Longest a Word or LibreOffice conversion may take |
+  | `model_seconds` | 300 | Longest the AI model may take to answer; raise it on a slow computer |
+  | `expiry_warning_days` | 30 | How early an owner hears that a certificate is about to expire |
+  | `log_lines` | 30 | Most signatures listed by `bot log` |
+
+  For someone who sends documents in bulk, add `limit: 200` (documents per hour) to that person in `contacts`. The checks that protect against malicious files stay fixed.
 - **Large batches take a moment.** Documents are signed one after the other, and the bot leaves a second between its messages so that WhatsApp does not take them for spam.
 - **Signed documents can be signed again.** Send a PDF that already has signatures to add another signer; the earlier signatures stay valid.
 - **What the bot keeps.** As little as it can. A document is held only while it is being signed or waits for an answer; after that its copy is erased at once, and its entry in the queue is gone within an hour. What stays in the `data` volume is the record of signatures, which holds the name of each signed file but never its content, a copy of each version of your configuration with every secret removed, and the token driver.

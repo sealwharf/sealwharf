@@ -10,7 +10,8 @@ from io import BytesIO
 
 from PIL import Image, ImageOps
 
-MAX_IMAGE_BYTES = 20 * 1024 * 1024
+from .. import limits
+
 MAX_PIXELS = 40_000_000
 FORMATS = frozenset({"PNG", "JPEG", "WEBP"})
 DPI = 200
@@ -28,7 +29,7 @@ def is_image(data: bytes) -> bool:
 
 def image_to_pdf(data: bytes) -> bytes:
     """Place the picture on an A4 page, upright, and return the page as a PDF."""
-    if len(data) > MAX_IMAGE_BYTES or not is_image(data):
+    if len(data) > limits.current.max_file_bytes or not is_image(data):
         raise ImageError("Unsupported or oversized image.")
     try:
         with Image.open(BytesIO(data)) as picture:

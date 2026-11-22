@@ -11,6 +11,7 @@ from pathlib import Path
 import httpx
 import yaml
 
+from . import limits
 from .adapters.audit import operational_logger
 from .adapters.gateway import GatewayError
 from .adapters.gateways import open_gateway
@@ -106,8 +107,10 @@ def main() -> None:
         sys.exit(f"Could not start: {exc} Fix config/sealwharf.yaml; the check command lists every problem.")
     secret = webhook_secret(create=True)
     backup_configuration(config_path(), data)
+    limits.use(config.limits)
     runtime = Runtime(data, config.requests_per_hour, config.confirmation_minutes, config.languages, config.names,
-                      config.request_limits, log_days=config.log_days, timezone=config.timezone)
+                      config.request_limits, settle_seconds=config.limits.batch_seconds,
+                      queue_limit=config.limits.waiting_per_owner, log_days=config.log_days, timezone=config.timezone)
     server = None
     model = LocalModelSession()
     db_path = data / "inbox.db"

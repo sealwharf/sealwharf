@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 from .authorization import canonical_number
+from .limits import Limits
+from .limits import parse as parse_limits
 from .messages import DEFAULT_LANGUAGE, LANGUAGES, resolve_language
 
 NUMBER = re.compile(r"[0-9]{9,15}")
@@ -85,6 +87,8 @@ class AppConfig:
     gateway_url: str | None = None
     gateway_type: str = "whapi"
     gateway_session: str = "default"
+    # Every limit of the `limits` section, defaults included.
+    limits: Limits = field(default_factory=Limits)
 
     @property
     def senders(self) -> frozenset[str]:
@@ -148,16 +152,8 @@ def load_config(path: Path) -> AppConfig:
     files = [signer.certificate for signer in signers if signer.certificate is not None]
     if len(set(identifiers)) != len(signers) or len(set(names)) != len(names) or len(set(files)) != len(files):
         raise ValueError("Certificate IDs, names, aliases and files must be distinct.")
-    limits = config.get("limits", {})
-    if not isinstance(limits, dict) or set(limits) - {"requests_per_hour", "confirmation_minutes", "log_days"}:
-        raise ValueError("Limits may contain only requests_per_hour, confirmation_minutes and log_days.")
-    log_days = limits.get("log_days", 90)
-    if isinstance(log_days, bool) or not isinstance(log_days, int) or not 1 <= log_days <= 3650:
-        raise ValueError("log_days must be a whole number of days, from 1 to 3650.")
-    per_hour, minutes = limits.get("requests_per_hour", 20), limits.get("confirmation_minutes", 5)
-    if (isinstance(per_hour, bool) or not isinstance(per_hour, int) or not 1 <= per_hour <= 1000
-            or isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 60):
-        raise ValueError("Limits must be whole numbers: 1-1000 requests per hour and 1-60 confirmation minutes.")
+    chosen = parse_limits(config.get("limits"))
+    per_hour, minutes, log_days = chosen.requests_per_hour, chosen.confirmation_minutes, chosen.log_days
     request_limits = {contact.number: contact.limit for contact in contacts.values() if contact.limit is not None}
     timezone = config.get("timezone")
     if timezone is not None:
@@ -167,7 +163,7 @@ def load_config(path: Path) -> AppConfig:
             raise ValueError("timezone must be the name of a time zone, such as Asia/Tokyo.") from None
     return AppConfig(signers, languages, contact_names, per_hour, minutes, public_url, gateway_token,
                      request_limits, gateway_url=gateway_url, gateway_type=gateway_type, gateway_session=gateway_session,
-                     log_days=log_days, timezone=timezone)
+                     log_days=log_days, timezone=timezone, limits=chosen)
 
 
 def _parse_contacts(value: object, default_language: str) -> dict[str, Contact]:

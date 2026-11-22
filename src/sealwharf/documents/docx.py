@@ -9,9 +9,9 @@ from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
-from .validation import MAX_PDF_BYTES, validate_pdf
+from .. import limits
+from .validation import validate_pdf
 
-MAX_DOCX_BYTES = 20 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MAX_MEMBERS = 5000
 MAX_XML_BYTES = 20 * 1024 * 1024
@@ -93,7 +93,7 @@ def _check_entries(package: ZipFile, kind: str) -> set[str]:
 
 def validate_odt(data: bytes) -> None:
     """Reject LibreOffice documents with macros, embedded objects, scripts or links to outside content."""
-    if len(data) > MAX_DOCX_BYTES or not is_opendocument(data):
+    if len(data) > limits.current.max_file_bytes or not is_opendocument(data):
         raise DocxError("Invalid or oversized ODT file.")
     try:
         with ZipFile(BytesIO(data)) as package:
@@ -133,7 +133,7 @@ def validate_docx(data: bytes) -> None:
     These checks are conservative, not an OS sandbox or a substitute for
     keeping the document converter updated.
     """
-    if len(data) > MAX_DOCX_BYTES or not data.startswith(b"PK\x03\x04"):
+    if len(data) > limits.current.max_file_bytes or not data.startswith(b"PK\x03\x04"):
         raise DocxError("Invalid or oversized DOCX file.")
     try:
         with ZipFile(BytesIO(data)) as package:
@@ -297,12 +297,13 @@ def find_libreoffice() -> Path | None:
     return Path(executable) if executable else None
 
 
-def convert_docx_to_pdf(data: bytes, executable: Path | None = None, timeout: float = 60) -> bytes:
+def convert_docx_to_pdf(data: bytes, executable: Path | None = None, timeout: float | None = None) -> bytes:
     """Convert a Word or LibreOffice Writer document to PDF without altering the original.
 
     Temporary data is removed on normal exit.
     """
     kind = validate_document(data)
+    timeout = timeout or limits.current.conversion_seconds
     executable = executable or find_libreoffice()
     if executable is None or not executable.is_file():
         raise DocxError("LibreOffice is not installed or configured.")
@@ -330,7 +331,7 @@ def convert_docx_to_pdf(data: bytes, executable: Path | None = None, timeout: fl
                 raise DocxError("DOCX conversion failed.")
             output = root / "document.pdf"
             with output.open("rb") as stream:
-                pdf = stream.read(MAX_PDF_BYTES + 1)
+                pdf = stream.read(limits.current.max_file_bytes + 1)
             validate_pdf(pdf)
             return pdf
     except DocxError:

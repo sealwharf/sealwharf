@@ -7,11 +7,10 @@ made it.
 
 from datetime import UTC, datetime, timedelta, tzinfo
 
+from .. import limits
 from ..adapters.audit import AuditLog
 from ..messages import text
 from .signers import UnlockedSigner
-
-MAX_LINES = 30
 
 
 def visible_entries(entries: list[dict], signers: tuple[UnlockedSigner, ...], number: str) -> list[dict]:
@@ -41,7 +40,7 @@ def log_report(audit: AuditLog, signers: tuple[UnlockedSigner, ...], number: str
         return text(language, "log_none", period=period)
     names = {signer.config.id: signer.config.name for signer in signers}
     lines = [text(language, "log_header", period=period, count=len(entries), zone=_zone_name(moment.astimezone(zone)))]
-    for entry in entries[-MAX_LINES:]:
+    for entry in entries[-limits.current.log_lines:]:
         approval = entry.get("approval")
         # An entry made before file names were recorded is told apart by the fingerprint of the signed file.
         name = entry.get("filename") or (entry.get("signed_sha256") or "")[:8]
@@ -50,6 +49,6 @@ def log_report(audit: AuditLog, signers: tuple[UnlockedSigner, ...], number: str
         lines.append(text(language, "log_line", when=datetime.fromisoformat(entry["time"]).astimezone(zone).strftime("%Y-%m-%d %H:%M"),
                           name=names.get(entry.get("certificate_id"), entry.get("certificate_id")),
                           requester=called(entry["requester"]), approval=how, file=name if len(name) <= 60 else name[:57] + "..."))
-    if len(entries) > MAX_LINES:
-        lines.append(text(language, "log_more", shown=MAX_LINES))
+    if len(entries) > limits.current.log_lines:
+        lines.append(text(language, "log_more", shown=limits.current.log_lines))
     return "\n".join(lines)
