@@ -137,3 +137,10 @@ def test_a_hidden_name_claims_no_place_and_names_nobody(hidden):
     document = page(lines=b"100 300 m 280 300 l S BT " + style + b" /F1 " + size + b" Tf 110 285 Td (Jane Example) Tj ET ")
     assert place_by_name(signature_places(document), "Jane Example") is None
     assert not any("Jane" in line for line in visible_lines(document))
+
+
+def test_a_line_typed_with_underscores_is_a_place_to_sign():
+    # Underscores are flat glyphs, about one point high; they must not be taken for hidden tiny text.
+    document = page((100, 300, b"_______________________________"), (130, 285, b"Jane Example"), (140, 272, b"Legal Representative"))
+    place = place_by_name(signature_places(document), "Jane Example")
+    assert place is not None and place.box[1] > 300

@@ -35,6 +35,9 @@ class _Line:
     box: tuple[float, float, float, float]
 
 
+# Characters that draw a line to sign on.
+FLAT = frozenset("_-‐‑‒–—―‗¯")
+
 def _visible(text_page, index: int) -> bool:
     """Whether a character can be read on the page: not invisible, not white, not tiny (as in TextVisibility)."""
     handle = text_page.raw
@@ -48,6 +51,9 @@ def _visible(text_page, index: int) -> bool:
         if alpha.value < 32 or min(red.value, green.value, blue.value) >= 235:
             return False
     left, bottom, right, top = text_page.get_charbox(index)
+    # A line drawn with underscores or dashes is flat by nature: its width, not its height, shows it can be seen.
+    if text_page.get_text_range(index, 1) in FLAT:
+        return right - left >= MIN_TEXT_POINTS * 0.5
     return top - bottom >= MIN_TEXT_POINTS * 0.5
 
 
